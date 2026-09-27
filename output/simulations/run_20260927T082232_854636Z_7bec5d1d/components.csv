@@ -1,0 +1,4 @@
+order_id,merchant_id,kind,created_tick,preparation_duration,item_value,status,ready_tick,handed_over_tick,cancelled_tick,cancellation_event,settled_revenue,planned_ready_tick,order_status
+1,35,FOOD,7,14,37386,HANDED_OVER,21,37,,,0,21,ASSIGNED
+2,54,FOOD,25,14,40673,HANDED_OVER,39,53,,,36771.93949906000000000000000,39,COMPLETED
+3,55,FOOD,39,6,32389,READY,45,,,,0,45,ASSIGNED

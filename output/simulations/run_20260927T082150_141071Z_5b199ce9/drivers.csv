@@ -1,0 +1,13 @@
+driver_id,x,y,state,current_order_id,assigned_order_count,delivered_order_count,completed_order_count,movement_count,travel_distance_km,operating_cost,emission_units,busy_ticks,utilization,food_pickup_wait_ticks_so_far,grocery_pickup_wait_ticks_so_far,revenue,profit
+1,4,38,IDLE,,0,0,0,0,0.0,0,0,0,0.0,0,0,0,0
+2,32,21,IDLE,,0,0,0,0,0.0,0,0,0,0.0,0,0,0,0
+3,42,19,IDLE,,1,1,0,44,22.0,8800,1320,46,0.647887323943662,0,0,0,-8800
+4,4,34,IDLE,,0,0,0,0,0.0,0,0,0,0.0,0,0,0,0
+5,16,29,FOOD_TRAVEL,3,1,0,0,31,15.5,6200,930,32,0.4507042253521127,0,0,0,-6200
+6,26,48,IDLE,,0,0,0,0,0.0,0,0,0,0.0,0,0,0,0
+7,36,38,IDLE,,0,0,0,0,0.0,0,0,0,0.0,0,0,0,0
+8,35,39,IDLE,,0,0,0,0,0.0,0,0,0,0.0,0,0,0,0
+9,25,6,IDLE,,0,0,0,0,0.0,0,0,0,0.0,0,0,0,0
+10,41,22,IDLE,,0,0,0,0,0.0,0,0,0,0.0,0,0,0,0
+11,25,18,IDLE,,0,0,0,0,0.0,0,0,0,0.0,0,0,0,0
+12,28,15,DELIVER,1,1,0,0,62,31.0,12400,1860,64,0.9014084507042254,0,0,0,-12400
