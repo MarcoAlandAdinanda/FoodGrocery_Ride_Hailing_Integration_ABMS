@@ -13,8 +13,8 @@ from unittest.mock import Mock, patch
 import numpy as np
 
 from src.simulation_engine import (
-    ComponentStatus, CustomerState, DriverState, HORIZON, IntegratedDeliveryModel,
-    MerchantState, OrderStatus, OrderType, SimulationConfig, build_demand_schedule,
+    ComponentStatus, DriverState, HORIZON, IntegratedDeliveryModel,
+    MerchantState, OrderStatus, SimulationConfig, build_demand_schedule,
     manhattan, load_hourly_weights, merchant_revenue, SPECIFICATION_PDF,
 )
 from src.simulation_parameters import (
@@ -105,7 +105,7 @@ class DemandTests(unittest.TestCase):
         order = fixture_order(model)
         self.assertEqual(len(model.agents), initial + 1)
         self.assertEqual(len(order.components), 2)
-        self.assertEqual(order.order_type, OrderType.INTEGRATED)
+        self.assertEqual(order.order_type, "INTEGRATED")
         self.assertFalse(hasattr(model, "dispatcher"))
 
     def test_normal_parameters_clamping_and_ceiling(self):
@@ -190,7 +190,7 @@ class LifecycleTests(unittest.TestCase):
         })
         self.assertEqual(model.summary()["store_preparing_cancelled_units"], 0)
         self.assertEqual(order.driver_revenue, 0)
-        self.assertEqual(customer.state, CustomerState.EXIT)
+        self.assertEqual(customer.state, "EXIT")
 
     def test_assigned_orders_never_timeout(self):
         model = fixture_model()
@@ -199,7 +199,7 @@ class LifecycleTests(unittest.TestCase):
         model.tick_counter = 100
         model.customers[order.customer_id].step()
         self.assertEqual(order.status, OrderStatus.ASSIGNED)
-        self.assertEqual(model.customers[order.customer_id].state, CustomerState.IN_SERVICE)
+        self.assertEqual(model.customers[order.customer_id].state, "IN_SERVICE")
         self.assertIsNone(order.cancelled_tick)
 
     def test_customer_cancellation_wins_over_becoming_ready_same_tick(self):
@@ -625,7 +625,7 @@ class FullRunAndExportTests(unittest.TestCase):
         self.assertTrue(all(m.pos is not None for m in model.merchants_by_id.values()))
         self.assertTrue(0 <= summary["driver_utilization"] <= 1)
         completed_integrated = sum(
-            o.status == OrderStatus.COMPLETED and o.order_type == OrderType.INTEGRATED
+            o.status == OrderStatus.COMPLETED and o.order_type == "INTEGRATED"
             for o in model.orders.values()
         )
         self.assertEqual(summary["completed_food_service_units"], summary["completed_orders"])
@@ -648,7 +648,7 @@ class FullRunAndExportTests(unittest.TestCase):
                                float(np.mean(completed_ticks)))
         self.assertFalse(any(key.startswith("p90_") for key in summary))
         completed_integrated_orders = [o for o in model.orders.values()
-                                       if o.order_type == OrderType.INTEGRATED and
+                                       if o.order_type == "INTEGRATED" and
                                        o.status == OrderStatus.COMPLETED]
         self.assertEqual(summary["integrated_completion_rate"],
                          len(completed_integrated_orders) / summary["integrated_orders"])
@@ -672,7 +672,7 @@ class FullRunAndExportTests(unittest.TestCase):
         self.assertEqual(other.last_driver_activation_order, self.model.last_driver_activation_order)
 
     def test_probability_endpoints(self):
-        for probability, order_type in ((0, OrderType.FOOD_ONLY), (1, OrderType.INTEGRATED)):
+        for probability, order_type in ((0, "FOOD_ONLY"), (1, "INTEGRATED")):
             with self.subTest(probability=probability):
                 model = IntegratedDeliveryModel(SimulationConfig(probability))
                 model.run()

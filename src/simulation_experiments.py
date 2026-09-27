@@ -178,8 +178,8 @@ def _write_csv(path: Path, rows: list[dict], columns: list[str]) -> None:
 
 
 def _read_probabilities(args: argparse.Namespace) -> list[float]:
-    if not math.isfinite(args.p_integrated) or not 0 < args.p_integrated <= 1:
-        raise ValueError("--p-integrated must be finite and greater than 0, up to 1.")
+    if not math.isfinite(args.p_integrated) or not 0 <= args.p_integrated <= 1:
+        raise ValueError("--p-integrated must be a finite number between 0 and 1.")
     probabilities = {args.p_integrated}
     if args.sensitivity:
         for token in args.p_values.split(","):
@@ -558,8 +558,14 @@ def run_experiment(args: argparse.Namespace) -> Path:
         for metric_index, metric in enumerate(METRICS):
             changes = []
             for replication in range(1, args.replications + 1):
-                reference = pairs_by_key[(replication, reference_id)][f"delta_{metric}"]
-                alternative = pairs_by_key[(replication, condition["condition_id"])][f"delta_{metric}"]
+                ref_key = (replication, reference_id)
+                alt_key = (replication, condition["condition_id"])
+                if ref_key not in pairs_by_key or alt_key not in pairs_by_key:
+                    logger.warning("Missing pair for sensitivity: replication=%d ref=%s alt=%s",
+                                   replication, reference_id, condition["condition_id"])
+                    continue
+                reference = pairs_by_key[ref_key].get(f"delta_{metric}")
+                alternative = pairs_by_key[alt_key].get(f"delta_{metric}")
                 if reference is not None and alternative is not None:
                     changes.append(alternative - reference)
             lower, upper = _bootstrap_interval(changes, BOOTSTRAP_SEED_BASE + 100_000 + metric_index +

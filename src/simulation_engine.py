@@ -63,11 +63,6 @@ FINANCIAL_NOTE = (
 )
 
 
-class OrderType(StrEnum):
-    FOOD_ONLY = "FOOD_ONLY"
-    INTEGRATED = "INTEGRATED"
-
-
 class OrderStatus(StrEnum):
     AVAILABLE = "AVAILABLE"
     ASSIGNED = "ASSIGNED"
@@ -90,12 +85,6 @@ class DriverState(StrEnum):
     FOOD_TRAVEL = "FOOD_TRAVEL"
     FOOD_PICKUP = "FOOD_PICKUP"
     DELIVER = "DELIVER"
-
-
-class CustomerState(StrEnum):
-    WAITING = "WAITING"
-    IN_SERVICE = "IN_SERVICE"
-    EXIT = "EXIT"
 
 
 class MerchantState(StrEnum):
@@ -313,7 +302,7 @@ class Order:
     order_id: int
     customer_id: int
     customer_pos: tuple[int, int]
-    order_type: OrderType
+    order_type: str  # "FOOD_ONLY" or "INTEGRATED"
     created_tick: int
     food: MerchantOrderComponent
     grocery: MerchantOrderComponent | None = None
@@ -344,6 +333,11 @@ class Order:
         return (self.food,) if self.grocery is None else (self.food, self.grocery)
 
     @property
+    def is_integrated(self) -> bool:
+        """True if this order contains a grocery component."""
+        return self.grocery is not None
+
+    @property
     def movement_count(self) -> int:
         return self.first_pickup_moves + self.store_to_restaurant_moves + self.restaurant_to_customer_moves
 
@@ -365,7 +359,7 @@ class Order:
 class Customer(mesa.Agent):
     def __init__(self, model: IntegratedDeliveryModel):
         super().__init__(model)
-        self.state = CustomerState.WAITING
+        self.state = "WAITING"  # WAITING, IN_SERVICE, EXIT
         self.order_id: int | None = None
 
     def step(self):
@@ -373,15 +367,15 @@ class Customer(mesa.Agent):
         order = self.model.orders[self.order_id]
         tick = self.model.tick_counter
         if order.assigned_driver_id is not None:
-            self.state = CustomerState.IN_SERVICE
+            self.state = "IN_SERVICE"
         elif order.status == OrderStatus.AVAILABLE and tick - order.created_tick >= TIMEOUT:
             order.status = OrderStatus.CANCELLED
             order.cancelled_tick = tick
-            self.state = CustomerState.EXIT
+            self.state = "EXIT"
         if order.status == OrderStatus.DELIVERED:
             order.status = OrderStatus.COMPLETED
             order.completed_tick = tick
-            self.state = CustomerState.EXIT
+            self.state = "EXIT"
 
 
 class Merchant(mesa.Agent):
@@ -582,6 +576,9 @@ class IntegratedDeliveryModel(mesa.Model):
         self.platform_revenue = ZERO
         csv_bytes = config.demand_csv.read_bytes()
         self.demand_sha256 = hashlib.sha256(csv_bytes).hexdigest()
+        # Hash of the parameter file for reproducibility checks (e.g., visualizer reset).
+        param_path = Path(__file__).with_name("simulation_parameters.py")
+        self.parameters_sha256 = hashlib.sha256(param_path.read_bytes()).hexdigest()
         self.hourly_weights = load_hourly_weights(csv_bytes)
         if scenario is not None:
             self._validate_scenario(scenario)
@@ -644,10 +641,29 @@ class IntegratedDeliveryModel(mesa.Model):
 
     def _select_store(self, random_index: int, restaurant_pos: tuple[int, int],
                       customer_pos: tuple[int, int]):
+        """Select a store using the configured policy.
+
+        The exogenous `random_index` (derived from `store_uniform`) is used as:
+        - Direct index for "uniform" policy.
+        - Tiebreaker for "nearest_restaurant" and "nearest_customer" policies
+          to preserve common random numbers across conditions.
+        """
         if self.config.store_selection == "uniform":
             return self.stores[random_index]
-        target = restaurant_pos if self.config.store_selection == "nearest_restaurant" else customer_pos
-        return min(enumerate(self.stores), key=lambda pair: (manhattan(pair[1].pos, target), pair[0]))[1]
+
+        target = (restaurant_pos
+                  if self.config.store_selection == "nearest_restaurant"
+                  else customer_pos)
+
+        # Compute distances to all stores.
+        distances = [(manhattan(store.pos, target), idx) for idx, store in enumerate(self.stores)]
+        min_dist = min(d for d, _ in distances)
+
+        # Among stores at minimum distance, use random_index as tiebreaker.
+        # Map random_index to a store index within the tied set.
+        tied_indices = [idx for d, idx in distances if d == min_dist]
+        chosen_idx = tied_indices[random_index % len(tied_indices)]
+        return self.stores[chosen_idx]
 
     def _create_order(self) -> Order:
         """PDF §1.5,1.10,1.15: one customer, one order, independently drawn components."""
@@ -685,7 +701,7 @@ class IntegratedDeliveryModel(mesa.Model):
             store.components[order_id] = grocery
         restaurant.components[order_id] = food
         order = Order(order_id, customer.unique_id, tuple(customer.pos),
-                      OrderType.INTEGRATED if integrated else OrderType.FOOD_ONLY,
+                      "INTEGRATED" if integrated else "FOOD_ONLY",
                       self.tick_counter, food, grocery)
         billable_steps = manhattan(restaurant.pos, customer.pos)
         if store is not None:
@@ -771,12 +787,12 @@ class IntegratedDeliveryModel(mesa.Model):
         statuses = Counter(order.status for order in orders)
         types = Counter(order.order_type for order in orders)
         completed_orders = [order for order in orders if order.status == OrderStatus.COMPLETED]
-        integrated_orders = [order for order in orders if order.order_type == OrderType.INTEGRATED]
+        integrated_orders = [order for order in orders if order.is_integrated]
         completed_integrated_orders = [order for order in integrated_orders
                                        if order.status == OrderStatus.COMPLETED]
         completed_food_service_units = len(completed_orders)
         completed_grocery_service_units = sum(
-            order.order_type == OrderType.INTEGRATED for order in completed_orders
+            order.is_integrated for order in completed_orders
         )
         completed_service_units = completed_food_service_units + completed_grocery_service_units
         moves = sum(d.movement_count for d in self.drivers)
@@ -791,8 +807,8 @@ class IntegratedDeliveryModel(mesa.Model):
             "tick": tick,
             "elapsed_ticks": elapsed_ticks,
             "generated_orders": len(orders),
-            "food_only_orders": types[OrderType.FOOD_ONLY],
-            "integrated_orders": types[OrderType.INTEGRATED],
+            "food_only_orders": types.get("FOOD_ONLY", 0),
+            "integrated_orders": types.get("INTEGRATED", 0),
             **{f"{status.value.lower()}_orders": statuses[status] for status in OrderStatus},
             "delivered_cumulative": sum(o.delivered_tick is not None for o in orders),
             "active_orders": len(self.active_orders),

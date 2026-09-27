@@ -317,6 +317,8 @@ class GridVisualizer:
             reset_model = IntegratedDeliveryModel(self.config, scenario=self.model.experiment_scenario)
             if reset_model.demand_sha256 != self.model.demand_sha256:
                 raise ValueError("Demand CSV changed; restore it to reset with identical inputs.")
+            if reset_model.parameters_sha256 != self.model.parameters_sha256:
+                raise ValueError("Parameter file changed; restore it to reset with identical inputs.")
         except (OSError, ValueError) as exc:
             self.footer.set_text(f"Reset failed: {exc}")
             self.figure.canvas.draw_idle()
