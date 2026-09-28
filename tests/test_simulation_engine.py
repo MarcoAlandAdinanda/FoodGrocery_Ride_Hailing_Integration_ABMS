@@ -19,7 +19,7 @@ from src.simulation_engine import (
 )
 from src.simulation_parameters import (
     FOOD_PREPARATION, FOOD_ITEM_VALUE, GROCERY_PREPARATION, GROCERY_ITEM_VALUE,
-    TIMEOUT,
+    ASSIGNMENT_TIMEOUT, HANDOVER_TIMEOUT,
 )
 
 
@@ -170,18 +170,18 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(second.food.ready_tick, 1)
         self.assertEqual(second.food.status, ComponentStatus.READY)
 
-    def test_timeout_precedes_matching_at_exact_threshold(self):
+    def test_assignment_timeout_precedes_matching_at_exact_threshold(self):
         model = fixture_model()
         order = fixture_order(model, duration=100)
-        model.tick_counter = TIMEOUT - 1
+        model.tick_counter = ASSIGNMENT_TIMEOUT - 1
         customer = model.customers[order.customer_id]
         customer.step()
         self.assertEqual(order.status, OrderStatus.AVAILABLE)
-        model.tick_counter = TIMEOUT
+        model.tick_counter = ASSIGNMENT_TIMEOUT
         model.step()
         self.assertEqual(order.status, OrderStatus.CANCELLED)
         self.assertIsNone(order.assigned_driver_id)
-        self.assertEqual(order.cancelled_tick, TIMEOUT)
+        self.assertEqual(order.cancelled_tick, ASSIGNMENT_TIMEOUT)
         self.assertEqual(order.food.cancellation_event, "PREPARATION_STOPPED")
         merchant = model.merchants_by_id[order.food.merchant_id]
         self.assertEqual(merchant.cancellation_kpis, {
@@ -192,20 +192,44 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(order.driver_revenue, 0)
         self.assertEqual(customer.state, "EXIT")
 
-    def test_assigned_orders_never_timeout(self):
+    def test_assigned_order_times_out_without_handover(self):
         model = fixture_model()
         order = fixture_order(model, duration=1000)
-        model.drivers[0].step()
-        model.tick_counter = 100
+        driver = model.drivers[0]
+        driver.step()
+        model.tick_counter = order.assigned_tick + HANDOVER_TIMEOUT - 1
         model.customers[order.customer_id].step()
         self.assertEqual(order.status, OrderStatus.ASSIGNED)
         self.assertEqual(model.customers[order.customer_id].state, "IN_SERVICE")
         self.assertIsNone(order.cancelled_tick)
+        model.tick_counter += 1
+        movement_before_timeout = driver.movement_count
+        customer = model.customers[order.customer_id]
+        model.step()
+        self.assertEqual(order.status, OrderStatus.CANCELLED)
+        self.assertEqual(order.cancelled_tick, order.assigned_tick + HANDOVER_TIMEOUT)
+        self.assertEqual(customer.state, "EXIT")
+        self.assertEqual(order.food.cancellation_event, "PREPARATION_STOPPED")
+        self.assertEqual(driver.movement_count, movement_before_timeout)
+        self.assertEqual(driver.state, DriverState.IDLE)
+        self.assertIsNone(driver.current_order_id)
+        self.assertNotIn(order.order_id, model.active_orders)
+
+    def test_completed_handover_disables_handover_timeout(self):
+        model = fixture_model()
+        order = fixture_order(model)
+        model.drivers[0].step()
+        order.food.status = ComponentStatus.HANDED_OVER
+        order.food.handed_over_tick = 1
+        model.tick_counter = order.assigned_tick + HANDOVER_TIMEOUT
+        model.customers[order.customer_id].step()
+        self.assertEqual(order.status, OrderStatus.ASSIGNED)
+        self.assertIsNone(order.cancelled_tick)
 
     def test_customer_cancellation_wins_over_becoming_ready_same_tick(self):
         model = fixture_model()
-        order = fixture_order(model, duration=TIMEOUT)
-        model.tick_counter = TIMEOUT
+        order = fixture_order(model, duration=ASSIGNMENT_TIMEOUT)
+        model.tick_counter = ASSIGNMENT_TIMEOUT
         model.step()
         self.assertEqual(order.food.cancellation_event, "PREPARATION_STOPPED")
         self.assertIsNone(order.food.ready_tick)
@@ -446,7 +470,7 @@ class MatchingMovementFinanceTests(unittest.TestCase):
                     self.assertEqual(Decimal(row["driver_operating_cost"]), Decimal(200))
                     self.assertEqual(int(row["emission_units"]), 30)
                     metadata = json.loads((destination / "metadata.json").read_text())
-                    self.assertEqual(metadata["schema_version"], 7)
+                    self.assertEqual(metadata["schema_version"], 8)
                     self.assertEqual(metadata["financial_parameters"]["delivery_minimum_fee"], "9000")
                     self.assertEqual(metadata["financial_parameters"]["delivery_fee_per_km"], "2250")
                     self.assertEqual(metadata["financial_parameters"]["driver_platform_share"], "0.08")
@@ -575,7 +599,7 @@ class CancellationKpiTests(unittest.TestCase):
                         tables[name] = list(reader)
                 summary = json.loads((destination / "summary.json").read_text())
                 metadata = json.loads((destination / "metadata.json").read_text())
-                self.assertEqual(metadata["schema_version"], 7)
+                self.assertEqual(metadata["schema_version"], 8)
                 self.assertNotIn("UNRESOLVED", json.dumps([summary, metadata]))
                 self.assertEqual(summary["run_status"], "PARTIAL")
                 for kind, label, expected_value in (("FOOD", "restaurant", 30000),
@@ -655,8 +679,14 @@ class FullRunAndExportTests(unittest.TestCase):
         for order in model.orders.values():
             self.assertEqual(order.settled, order.status == OrderStatus.COMPLETED)
             if order.status == OrderStatus.CANCELLED:
-                self.assertEqual(order.cancelled_tick - order.created_tick, TIMEOUT)
-                self.assertIsNone(order.assigned_tick)
+                if order.assigned_tick is None:
+                    self.assertEqual(order.cancelled_tick - order.created_tick,
+                                     ASSIGNMENT_TIMEOUT)
+                else:
+                    self.assertEqual(order.cancelled_tick - order.assigned_tick,
+                                     HANDOVER_TIMEOUT)
+                    self.assertTrue(any(component.handed_over_tick is None
+                                        for component in order.components))
             if order.grocery is not None and order.food.handed_over_tick is not None:
                 self.assertLess(order.grocery.handed_over_tick, order.food.handed_over_tick)
 

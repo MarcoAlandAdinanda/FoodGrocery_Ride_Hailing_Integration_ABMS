@@ -120,7 +120,8 @@ melintasi seluruh baris hari, kemudian dinormalisasi. CSV default berisi tujuh h
 
 The engine and visualizer accept `--daily-customers` (default 300),
 `--num-drivers` (default 12), and `--num-stores` (default 15), all positive integers. Grid size 50x50, 50
-Restaurants, 15 Stores, 23-minute timeout and 1440-tick horizon remain fixed.
+Restaurants, 15 Stores, a 15-minute assignment timeout, a 30-minute handover
+timeout and a 1440-tick horizon remain fixed.
 Use the experiment controller for batch runs.
 
 ## Jarak dan gerak empat arah
@@ -287,16 +288,19 @@ menggunakan seluruh event yang sudah terjadi sampai waktu tersebut.
 
 Pembatalan customer mendahului pembaruan merchant: jika pembatalan bertepatan
 dengan tick persiapan selesai dan komponen masih PREPARING, komponen dihitung.
-Rata-rata persiapan baseline adalah sekitar 12,90 menit untuk food dan 31 menit untuk
-grocery, sedangkan timeout 23 menit. KPI ini dapat bernilai nol walaupun ada
-pembatalan READY.
+Rata-rata persiapan baseline adalah sekitar 12,90 menit untuk food dan 31 menit
+untuk grocery. Timeout assignment adalah 15 menit sejak order dibuat, sedangkan
+timeout handover adalah 30 menit sejak Driver ditugaskan. KPI ini dapat bernilai
+nol walaupun ada pembatalan READY.
 
 Ini adalah pencatatan nilai produk yang dibatalkan sebagai KPI agen; tidak ada
 mekanisme pembayar, pembayaran kompensasi, atau refund. KPI tidak mengubah
 revenue/profit. Rumus pajak dan revenue tetap mengikuti asumsi model PDF.
 
-Metadata standalone menggunakan `schema_version: 7`; run dengan shared experiment
-scenario menggunakan skema 8. Manifest controller menggunakan
+Metadata standalone menggunakan `schema_version: 8`; run dengan shared experiment
+scenario menggunakan skema 9. Kenaikan versi ini mengganti satu field
+`timeout_ticks` dengan `assignment_timeout_ticks` dan
+`handover_timeout_ticks`. Manifest controller menggunakan
 `experiment_schema_version: 13`. Versi 13 mengganti seluruh metrik waktu P90
 dengan mean aritmetika atas observasi order yang tersedia. Versi 12 menambahkan jumlah Store ke desain
 faktorial penuh 3 x 3 x 3 dan menggunakan posisi Store bertingkat; versi 11
@@ -322,9 +326,14 @@ membedakan model pada ekspor lama dan baru. Ekspor lama tidak dimigrasikan.
 ## Batas waktu dan reproduksibilitas
 
 Urutan tick: generate, Customer, Store, Restaurant, Driver, resolve, KPI.
-Driver diacak setiap tick oleh RNG model. Customer membatalkan order AVAILABLE
-tepat pada usia 23 menit sebelum matching tick tersebut. Order ASSIGNED tidak
-timeout. Persiapan siap pada `created + duration`, termasuk durasi nol.
+Driver diacak setiap tick oleh RNG model. Customer membatalkan order `AVAILABLE`
+tepat pada usia 15 menit sebelum matching pada tick tersebut. Setelah Driver
+ditugaskan, Customer membatalkan order jika pada usia assignment 30 menit masih
+ada komponen yang belum `HANDED_OVER`. Pemeriksaan deadline terjadi sebelum
+aktivasi Merchant dan Driver, sehingga deadline menang atas matching atau
+handover yang baru mungkin terjadi pada tick batas. Setelah seluruh komponen
+`HANDED_OVER`, timeout kedua tidak lagi berlaku. Persiapan siap pada
+`created + duration`, termasuk durasi nol.
 
 Hanya cabang state awal Driver yang dieksekusi per tick. Karena merchant aktif
 sebelum Driver, kedatangan pada tick t baru bisa menerima handover pada tick

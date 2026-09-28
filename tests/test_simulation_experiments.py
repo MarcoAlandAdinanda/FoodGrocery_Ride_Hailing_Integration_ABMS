@@ -170,7 +170,7 @@ class SharedScenarioTests(unittest.TestCase):
             self.assertIsNone(before.grocery)
             self.assertIsNotNone(after.grocery)
         self.assertEqual(baseline._metadata()["experiment_scenario"]["sha256"], scenario.sha256)
-        self.assertEqual(baseline._metadata()["schema_version"], 8)
+        self.assertEqual(baseline._metadata()["schema_version"], 9)
 
     def test_preparation_multipliers_and_nearest_store_rules(self):
         scenario = build_experiment_scenario(42, daily_customers=24, num_drivers=2)
@@ -194,7 +194,9 @@ class SharedScenarioTests(unittest.TestCase):
     def test_store_rule_uses_requested_target_and_stable_tie_break(self):
         positions = [(1, 0), (0, 1), (48, 49)] + [(20, 20)] * 12
         restaurant_pos, customer_pos = (0, 0), (49, 49)
-        for rule, expected_index in (("uniform", 1), ("nearest_restaurant", 0),
+        # Stores 0 and 1 are equally near the Restaurant. random_index=1 must
+        # therefore select the second tied Store to preserve common randomness.
+        for rule, expected_index in (("uniform", 1), ("nearest_restaurant", 1),
                                      ("nearest_customer", 2)):
             model = IntegratedDeliveryModel(SimulationConfig(1, store_selection=rule))
             for store, position in zip(model.stores, positions):

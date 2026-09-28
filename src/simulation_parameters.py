@@ -23,7 +23,8 @@ NUM_RESTAURANTS = 50
 NUM_STORES = 15
 HORIZON = 1440
 TICKS_PER_HOUR = 60
-TIMEOUT = 23
+ASSIGNMENT_TIMEOUT = 15
+HANDOVER_TIMEOUT = 30
 DEFAULT_SEED = 42
 # Reference integration probability: average obtained from the primary survey.
 P_INTEGRATION: float | None = 0.44

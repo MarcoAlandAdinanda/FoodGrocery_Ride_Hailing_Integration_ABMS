@@ -34,7 +34,8 @@ from mesa.space import MultiGrid
 if __package__:
     from .simulation_parameters import (
         ROOT, DEFAULT_DEMAND_CSV, GRID_WIDTH, GRID_HEIGHT, NUM_DRIVERS,
-        NUM_RESTAURANTS, NUM_STORES, DAILY_CUSTOMERS, HORIZON, TICKS_PER_HOUR, TIMEOUT,
+        NUM_RESTAURANTS, NUM_STORES, DAILY_CUSTOMERS, HORIZON, TICKS_PER_HOUR,
+        ASSIGNMENT_TIMEOUT, HANDOVER_TIMEOUT,
         DEFAULT_SEED, P_INTEGRATION, KM_PER_STEP, COST_PER_STEP, EMISSION_PER_STEP,
         FOOD_PREPARATION, FOOD_ITEM_VALUE, GROCERY_PREPARATION,
         GROCERY_ITEM_VALUE, DELIVERY_MINIMUM_FEE, DELIVERY_FEE_PER_KM,
@@ -44,7 +45,8 @@ if __package__:
 else:
     from simulation_parameters import (
         ROOT, DEFAULT_DEMAND_CSV, GRID_WIDTH, GRID_HEIGHT, NUM_DRIVERS,
-        NUM_RESTAURANTS, NUM_STORES, DAILY_CUSTOMERS, HORIZON, TICKS_PER_HOUR, TIMEOUT,
+        NUM_RESTAURANTS, NUM_STORES, DAILY_CUSTOMERS, HORIZON, TICKS_PER_HOUR,
+        ASSIGNMENT_TIMEOUT, HANDOVER_TIMEOUT,
         DEFAULT_SEED, P_INTEGRATION, KM_PER_STEP, COST_PER_STEP, EMISSION_PER_STEP,
         FOOD_PREPARATION, FOOD_ITEM_VALUE, GROCERY_PREPARATION,
         GROCERY_ITEM_VALUE, DELIVERY_MINIMUM_FEE, DELIVERY_FEE_PER_KM,
@@ -366,12 +368,23 @@ class Customer(mesa.Agent):
         """PDF §1.13-1.14: observe only shared order status and assignment."""
         order = self.model.orders[self.order_id]
         tick = self.model.tick_counter
-        if order.assigned_driver_id is not None:
-            self.state = "IN_SERVICE"
-        elif order.status == OrderStatus.AVAILABLE and tick - order.created_tick >= TIMEOUT:
+        assignment_expired = (
+            order.status == OrderStatus.AVAILABLE
+            and tick - order.created_tick >= ASSIGNMENT_TIMEOUT
+        )
+        handover_expired = (
+            order.status == OrderStatus.ASSIGNED
+            and order.assigned_tick is not None
+            and tick - order.assigned_tick >= HANDOVER_TIMEOUT
+            and any(component.status != ComponentStatus.HANDED_OVER
+                    for component in order.components)
+        )
+        if assignment_expired or handover_expired:
             order.status = OrderStatus.CANCELLED
             order.cancelled_tick = tick
             self.state = "EXIT"
+        elif order.assigned_driver_id is not None:
+            self.state = "IN_SERVICE"
         if order.status == OrderStatus.DELIVERED:
             order.status = OrderStatus.COMPLETED
             order.completed_tick = tick
@@ -528,8 +541,12 @@ class Driver(mesa.Agent):
             if self.current_order_id is not None:
                 self.busy_ticks += 1
             return
-        self.busy_ticks += 1
         order = self.model.orders[self.current_order_id]
+        # Customer deadlines run before Driver activation. Do not move or accrue
+        # another busy tick for an order cancelled earlier in the same tick.
+        if order.status == OrderStatus.CANCELLED:
+            return
+        self.busy_ticks += 1
         if initial_state in (DriverState.GROCERY_TRAVEL, DriverState.FOOD_TRAVEL):
             self._move(order, initial_state)
             if self.pos == self.target_pos:
@@ -993,7 +1010,7 @@ class IntegratedDeliveryModel(mesa.Model):
             except PackageNotFoundError:
                 packages[name] = None
         return {
-            "schema_version": 8 if self.experiment_scenario is not None else 7,
+            "schema_version": 9 if self.experiment_scenario is not None else 8,
             "exported_at_utc": datetime.now(timezone.utc).isoformat(),
             "python_version": platform.python_version(), "libraries": packages,
             "config": {"p_integration": self.config.p_integration, "seed": self.config.seed,
@@ -1009,7 +1026,9 @@ class IntegratedDeliveryModel(mesa.Model):
             "baseline": {"width": GRID_WIDTH, "height": GRID_HEIGHT, "torus": False,
                          "drivers": self.config.num_drivers, "restaurants": NUM_RESTAURANTS,
                          "stores": self.config.num_stores, "daily_customers": self.config.daily_customers,
-                         "horizon_ticks": HORIZON, "timeout_ticks": TIMEOUT,
+                          "horizon_ticks": HORIZON,
+                          "assignment_timeout_ticks": ASSIGNMENT_TIMEOUT,
+                          "handover_timeout_ticks": HANDOVER_TIMEOUT,
                          "km_per_step": KM_PER_STEP, "cost_per_step": COST_PER_STEP,
                          "emission_units_per_step": EMISSION_PER_STEP},
             "parameter_file": {"path": str(Path(__file__).with_name("simulation_parameters.py")),
