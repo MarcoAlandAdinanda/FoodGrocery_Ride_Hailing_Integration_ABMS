@@ -15,7 +15,8 @@ import numpy as np
 from src.simulation_engine import (
     ComponentStatus, DriverState, HORIZON, IntegratedDeliveryModel,
     MerchantState, OrderStatus, SimulationConfig, build_demand_schedule,
-    manhattan, load_hourly_weights, merchant_revenue, SPECIFICATION_PDF,
+    calculate_delivery_fee, manhattan, load_hourly_weights, merchant_revenue,
+    SPECIFICATION_PDF,
 )
 from src.simulation_parameters import (
     FOOD_PREPARATION, FOOD_ITEM_VALUE, GROCERY_PREPARATION, GROCERY_ITEM_VALUE,
@@ -137,6 +138,8 @@ class LifecycleTests(unittest.TestCase):
             self.assertEqual(driver.state, state)
         self.assertEqual((order.grocery_arrival_tick, order.grocery.handed_over_tick), (1, 2))
         self.assertEqual((order.food_arrival_tick, order.food.handed_over_tick), (3, 4))
+        self.assertEqual(order.time_metrics()["grocery_ready_to_handover_ticks"], 2)
+        self.assertEqual(order.time_metrics()["food_ready_to_handover_ticks"], 4)
         self.assertEqual(order.delivered_tick, 5)
         self.assertEqual(order.status, OrderStatus.DELIVERED)
         self.assertFalse(order.settled)
@@ -145,6 +148,10 @@ class LifecycleTests(unittest.TestCase):
         model.step()
         self.assertEqual(order.status, OrderStatus.COMPLETED)
         self.assertEqual(order.completed_tick, 6)
+        self.assertEqual(model.summary()["mean_food_ready_to_handover_ticks"], 4)
+        self.assertEqual(model.summary()["mean_integrated_grocery_ready_to_handover_ticks"], 2)
+        self.assertEqual(model.summary()["mean_food_preparation_queue_ticks"], 0)
+        self.assertEqual(model.summary()["mean_integrated_grocery_preparation_queue_ticks"], 0)
         self.assertEqual(order.time_metrics()["acknowledgement_delay_ticks"], 1)
         self.assertEqual(order.time_metrics()["delivery_service_ticks"], 5)
         self.assertEqual(order.time_metrics()["completion_total_ticks"], 6)
@@ -153,9 +160,9 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(len(model.agents), len(model.drivers) + len(model.restaurants) + len(model.stores))
         self.assertTrue(order.settled)
 
-    def test_preparation_zero_one_and_parallel_records(self):
+    def test_preparation_is_single_server_fifo_and_ready_does_not_block_queue(self):
         model = fixture_model()
-        first, second = fixture_order(model, duration=0), fixture_order(model, duration=1)
+        first, second = fixture_order(model, duration=2), fixture_order(model, duration=1)
         merchant = model.merchants_by_id[first.food.merchant_id]
         original = model.merchants_by_id[second.food.merchant_id]
         del original.components[second.order_id]
@@ -163,16 +170,43 @@ class LifecycleTests(unittest.TestCase):
         merchant.components[second.order_id] = second.food
         self.assertEqual(merchant.state, MerchantState.ACTIVE)
         merchant.step()
+        self.assertEqual(first.food.status, ComponentStatus.PREPARING)
+        self.assertEqual(first.food.preparation_started_tick, 0)
+        self.assertEqual(second.food.status, ComponentStatus.QUEUED)
+        model.tick_counter = 2
+        merchant.step()
         self.assertEqual(first.food.status, ComponentStatus.READY)
         self.assertEqual(second.food.status, ComponentStatus.PREPARING)
+        self.assertEqual(second.food.preparation_started_tick, 2)
+        self.assertEqual(first.time_metrics()["food_preparation_queue_ticks"], 0)
+        self.assertEqual(second.time_metrics()["food_preparation_queue_ticks"], 2)
+        self.assertEqual(model.summary()["mean_food_preparation_queue_ticks"], 1)
+        model.tick_counter = 3
+        merchant.step()
+        self.assertEqual(second.food.ready_tick, 3)
+        self.assertEqual(second.food.status, ComponentStatus.READY)
+
+    def test_cancelled_queued_component_never_starts_preparation(self):
+        model = fixture_model()
+        first, second = fixture_order(model, duration=100), fixture_order(model, duration=5)
+        merchant = model.merchants_by_id[first.food.merchant_id]
+        original = model.merchants_by_id[second.food.merchant_id]
+        del original.components[second.order_id]
+        second.food.merchant_id = merchant.unique_id
+        merchant.components[second.order_id] = second.food
+        merchant.step()
+        second.status = OrderStatus.CANCELLED
         model.tick_counter = 1
         merchant.step()
-        self.assertEqual(second.food.ready_tick, 1)
-        self.assertEqual(second.food.status, ComponentStatus.READY)
+        self.assertEqual(second.food.status, ComponentStatus.CANCELLED)
+        self.assertIsNone(second.food.preparation_started_tick)
+        self.assertIsNone(second.time_metrics()["food_preparation_queue_ticks"])
+        self.assertEqual(second.food.cancellation_event, "QUEUE_CANCELLED")
 
     def test_assignment_timeout_precedes_matching_at_exact_threshold(self):
         model = fixture_model()
         order = fixture_order(model, duration=100)
+        model.merchants_by_id[order.food.merchant_id].step()
         model.tick_counter = ASSIGNMENT_TIMEOUT - 1
         customer = model.customers[order.customer_id]
         customer.step()
@@ -195,6 +229,7 @@ class LifecycleTests(unittest.TestCase):
     def test_assigned_order_times_out_without_handover(self):
         model = fixture_model()
         order = fixture_order(model, duration=1000)
+        model.merchants_by_id[order.food.merchant_id].step()
         driver = model.drivers[0]
         driver.step()
         model.tick_counter = order.assigned_tick + HANDOVER_TIMEOUT - 1
@@ -229,6 +264,7 @@ class LifecycleTests(unittest.TestCase):
     def test_customer_cancellation_wins_over_becoming_ready_same_tick(self):
         model = fixture_model()
         order = fixture_order(model, duration=ASSIGNMENT_TIMEOUT)
+        model.merchants_by_id[order.food.merchant_id].step()
         model.tick_counter = ASSIGNMENT_TIMEOUT
         model.step()
         self.assertEqual(order.food.cancellation_event, "PREPARATION_STOPPED")
@@ -290,7 +326,18 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(order.food_pickup_wait_ticks, 3)
         self.assertEqual(order.food.handed_over_tick, 5)
         self.assertEqual(order.time_metrics()["food_pickup_wait_ticks"], 3)
+        self.assertEqual(order.time_metrics()["food_ready_to_handover_ticks"], 0)
         self.assertEqual(order.movement_count, 0)
+
+    def test_ready_to_handover_is_unobserved_until_handover(self):
+        model = fixture_model()
+        order = fixture_order(model, duration=0)
+        merchant = model.merchants_by_id[order.food.merchant_id]
+        merchant.step()
+        self.assertEqual(order.food.status, ComponentStatus.READY)
+        self.assertIsNone(order.time_metrics()["food_ready_to_handover_ticks"])
+        order.food.handed_over_tick = 7
+        self.assertEqual(order.time_metrics()["food_ready_to_handover_ticks"], 7)
 
     def test_resolving_previous_order_preserves_new_driver_assignment(self):
         model = fixture_model()
@@ -470,14 +517,26 @@ class MatchingMovementFinanceTests(unittest.TestCase):
                     self.assertEqual(Decimal(row["driver_operating_cost"]), Decimal(200))
                     self.assertEqual(int(row["emission_units"]), 30)
                     metadata = json.loads((destination / "metadata.json").read_text())
-                    self.assertEqual(metadata["schema_version"], 8)
-                    self.assertEqual(metadata["financial_parameters"]["delivery_minimum_fee"], "9000")
-                    self.assertEqual(metadata["financial_parameters"]["delivery_fee_per_km"], "2250")
+                    self.assertEqual(metadata["schema_version"], 15)
+                    self.assertEqual(metadata["financial_parameters"]["delivery_minimum_fee"], "10200")
+                    self.assertEqual(
+                        metadata["financial_parameters"]["delivery_included_distance_km"], "4")
+                    self.assertEqual(metadata["financial_parameters"]["delivery_fee_per_km"], "2550")
+                    self.assertEqual(metadata["financial_parameters"]["pb1_rate"], "0.10")
+                    self.assertEqual(
+                        metadata["financial_parameters"]["customer_platform_commission_rate"],
+                        "0.1801",
+                    )
+                    self.assertEqual(metadata["financial_parameters"]["ppn_multiplier"], "1.11")
                     self.assertEqual(metadata["financial_parameters"]["driver_platform_share"], "0.08")
                     self.assertEqual(metadata["financial_parameters"]["driver_delivery_fee_share"], "0.92")
-                    self.assertEqual(
-                        metadata["financial_parameters"]["merchant_platform_share"],
-                        "0.1781025272727272727272727273",
+                    self.assertIn(
+                        "driver_platform_share",
+                        metadata["financial_parameters"]["platform_revenue_formula"],
+                    )
+                    self.assertIn(
+                        "customer_platform_commission_rate",
+                        metadata["financial_parameters"]["merchant_revenue_formula"],
                     )
                     self.assertEqual(metadata["policies"]["matching"],
                                      "Manhattan to first merchant, creation tick, order ID")
@@ -500,7 +559,7 @@ class MatchingMovementFinanceTests(unittest.TestCase):
                                  quoted + Decimal(order.first_pickup_moves) * Decimal("0.5"))
 
     def test_billable_legs_quotes_and_exact_settlement(self):
-        for probability, expected_steps, expected_fee in ((0, 10, 11250), (1, 12, 13500)):
+        for probability, expected_steps, expected_fee in ((0, 10, 12750), (1, 12, 15300)):
             with self.subTest(probability=probability):
                 model = fixture_model(probability)
                 for restaurant in model.restaurants:
@@ -512,7 +571,14 @@ class MatchingMovementFinanceTests(unittest.TestCase):
                 self.assertEqual(order.billable_distance_km, Decimal(expected_steps) * Decimal("0.5"))
                 self.assertEqual(order.delivery_fee, Decimal(expected_fee))
                 item_total = 30000 if probability == 0 else 80000
-                self.assertEqual(order.customer_payment, Decimal(item_total) * Decimal("1.1") + order.delivery_fee)
+                expected_pb1 = Decimal(item_total) * Decimal("0.1")
+                expected_commission = Decimal(item_total) * Decimal("0.1801") * Decimal("1.11")
+                self.assertEqual(order.tax, expected_pb1)
+                self.assertEqual(order.platform_commission_charge, expected_commission)
+                self.assertEqual(
+                    order.customer_payment,
+                    order.delivery_fee + Decimal(item_total) + expected_pb1 + expected_commission,
+                )
                 driver = model.drivers[0]
                 driver.step()
                 model._settle_order(order)
@@ -520,10 +586,24 @@ class MatchingMovementFinanceTests(unittest.TestCase):
                 order.status = OrderStatus.COMPLETED
                 model._settle_order(order)
                 self.assertEqual(order.driver_revenue, order.delivery_fee * Decimal("0.92"))
-                expected_merchant = sum((Decimal(c.item_value) * Decimal("0.90408722") for c in order.components), Decimal(0))
+                expected_merchant = sum(
+                    (Decimal(c.item_value) * Decimal("0.900089") for c in order.components),
+                    Decimal(0),
+                )
                 self.assertEqual(sum(c.settled_revenue for c in order.components), expected_merchant)
-                self.assertEqual(order.platform_revenue, order.customer_payment - order.driver_revenue - expected_merchant)
-                self.assertEqual(merchant_revenue(30000), Decimal("27122.61660000"))
+                expected_platform = expected_commission + order.delivery_fee * Decimal("0.08")
+                self.assertEqual(order.platform_revenue, expected_platform)
+                self.assertEqual(merchant_revenue(30000), Decimal("27002.670000"))
+
+    def test_delivery_fee_starts_incrementing_only_above_four_km(self):
+        for distance, expected_fee in (
+            ("0", "10200"),
+            ("4", "10200"),
+            ("4.5", "11475.0"),
+            ("5", "12750"),
+        ):
+            with self.subTest(distance=distance):
+                self.assertEqual(calculate_delivery_fee(Decimal(distance)), Decimal(expected_fee))
 
 
 class CancellationKpiTests(unittest.TestCase):
@@ -585,6 +665,7 @@ class CancellationKpiTests(unittest.TestCase):
             del model.merchants_by_id[b.merchant_id].components[b.order_id]
             b.merchant_id = a.merchant_id
             model.merchants_by_id[a.merchant_id].components[b.order_id] = b
+            model.merchants_by_id[a.merchant_id].step()
         model.tick_counter = 60
         model.step()
         before = model.snapshot()
@@ -599,23 +680,26 @@ class CancellationKpiTests(unittest.TestCase):
                         tables[name] = list(reader)
                 summary = json.loads((destination / "summary.json").read_text())
                 metadata = json.loads((destination / "metadata.json").read_text())
-                self.assertEqual(metadata["schema_version"], 8)
+                self.assertEqual(metadata["schema_version"], 15)
                 self.assertNotIn("UNRESOLVED", json.dumps([summary, metadata]))
                 self.assertEqual(summary["run_status"], "PARTIAL")
-                for kind, label, expected_value in (("FOOD", "restaurant", 30000),
-                                                     ("GROCERY", "store", 70000)):
+                for kind, label, expected_value in (("FOOD", "restaurant", 0),
+                                                     ("GROCERY", "store", 50000)):
                     rows = [m for m in tables["merchants"] if m["kind"] == kind]
-                    self.assertEqual(sum(int(m["preparing_cancelled_units"]) for m in rows), 2)
+                    self.assertEqual(sum(int(m["preparing_cancelled_units"]) for m in rows), 1)
                     self.assertEqual(sum(Decimal(m["preparing_cancelled_product_value"]) for m in rows), expected_value)
                     affected = [m for m in rows if int(m["preparing_cancelled_units"])]
                     self.assertEqual(len(affected), 1)
-                    for suffix, expected in (("units", 2), ("product_value", expected_value)):
+                    for suffix, expected in (("units", 1), ("product_value", expected_value)):
                         key = f"{label}_preparing_cancelled_{suffix}"
                         self.assertEqual(Decimal(summary[key]), expected)
                         self.assertEqual(Decimal(tables["kpi_ticks"][-1][key]), expected)
                     source = [c for c in tables["components"] if c["kind"] == kind
                               and c["cancellation_event"] == "PREPARATION_STOPPED"]
-                    self.assertEqual(len(source), 2)
+                    self.assertEqual(len(source), 1)
+                    queued = [c for c in tables["components"] if c["kind"] == kind
+                              and c["cancellation_event"] == "QUEUE_CANCELLED"]
+                    self.assertEqual(len(queued), 1)
                     self.assertEqual(sum(Decimal(c["item_value"]) for c in source), expected_value)
                     self.assertTrue(all(c["merchant_id"] == affected[0]["merchant_id"] for c in source))
                 self.assertEqual(model.snapshot(), before)
@@ -643,7 +727,15 @@ class FullRunAndExportTests(unittest.TestCase):
         self.assertEqual(summary["movement_count"], sum(o.movement_count for o in model.orders.values()))
         self.assertEqual(summary["driver_revenue"], sum(o.driver_revenue for o in model.orders.values()))
         self.assertEqual(summary["merchant_revenue"], sum(c.settled_revenue for o in model.orders.values() for c in o.components))
-        self.assertEqual(summary["settled_customer_payment"], summary["driver_revenue"] + summary["merchant_revenue"] + summary["platform_revenue"])
+        settled_commission_charges = sum(
+            (o.platform_commission_charge for o in model.orders.values() if o.settled),
+            Decimal(0),
+        )
+        self.assertEqual(
+            summary["settled_customer_payment"],
+            summary["driver_revenue"] + summary["merchant_revenue"]
+            + summary["platform_revenue"] + settled_commission_charges,
+        )
         self.assertEqual(summary["driver_profit"], summary["driver_revenue"] - summary["driver_operating_cost"])
         self.assertEqual((len(model.restaurants), len(model.stores)), (50, 15))
         self.assertTrue(all(m.pos is not None for m in model.merchants_by_id.values()))

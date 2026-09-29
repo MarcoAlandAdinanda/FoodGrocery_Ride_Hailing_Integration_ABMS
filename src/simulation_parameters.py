@@ -48,24 +48,20 @@ COST_PER_STEP = Decimal("200")
 # Scenario assumption for a low-carbon motorcycle: 60 g CO2/km. Because one
 # grid movement represents 0.5 km, each actual movement emits 30 g CO2.
 EMISSION_PER_STEP = 30
-# Generic Indonesian Zone I delivery-tariff proxy. KP 667/2022 publishes a
-# Rp8,000--10,000 minimum and Rp2,000--2,500/km range for app-based motorcycle
-# services; the model uses each midpoint rather than claiming a platform tariff.
-DELIVERY_MINIMUM_FEE = Decimal("9000")
-DELIVERY_FEE_PER_KM = Decimal("2250")
-TAX_RATE = Decimal("0.10")
+# KP 667/2022, Zone II (Jabodetabek): the minimum fee includes the first 4 km;
+# only the distance above 4 km is charged at the per-kilometre rate.
+DELIVERY_MINIMUM_FEE = Decimal("10200")
+DELIVERY_INCLUDED_DISTANCE_KM = Decimal("4")
+DELIVERY_FEE_PER_KM = Decimal("2550")
+# Customer-payment components. PPN_MULTIPLIER is 1 + the 11% PPN rate and is
+# applied only to the customer-facing platform commission.
+PB1_RATE = Decimal("0.10")
+CUSTOMER_PLATFORM_COMMISSION_RATE = Decimal("0.1801")
+PPN_MULTIPLIER = Decimal("1.11")
 # Grab announced a maximum 8% Driver revenue share for the platform from
 # 1 July 2026. The model applies that percentage uniformly to every order.
 DRIVER_PLATFORM_SHARE = Decimal("0.08")
 DRIVER_DELIVERY_FEE_SHARE = Decimal("1") - DRIVER_PLATFORM_SHARE
-
-# Grab does not publish one universal GrabFood/GrabMart merchant commission;
-# commercial terms can differ by merchant and delivery model. The simulation
-# therefore uses one explicit baseline assumption for both Restaurants and
-# Stores. This effective share preserves the prior merchant settlement level
-# while expressing it as a single, generalizable proportion of gross merchant
-# proceeds (item value plus modeled tax). It is not an official Grab tariff.
-MERCHANT_PLATFORM_SHARE = Decimal("0.1781025272727272727272727273")
 
 # Paired experiment defaults. These baseline values and sensitivity grids were
 # confirmed for the final experiment design. For paired comparisons,

@@ -16,7 +16,8 @@ import matplotlib.pyplot as plt
 
 from src.simulation_engine import (IntegratedDeliveryModel, SimulationConfig,
                                    build_experiment_scenario)
-from src.simulation_experiments import (EMISSION_PAIR_METRICS, INTEGRATED_EXPERIENCE_METRICS,
+from src.simulation_experiments import (DRIVER_PAIR_METRICS, EMISSION_PAIR_METRICS,
+                                        INTEGRATED_EXPERIENCE_METRICS,
                                         KPI_SUBJECT, KPI_SUBJECTS, METRICS,
                                         _apply_holm_correction, _paired_significance,
                                         _read_store_counts, _read_store_selections, main)
@@ -25,7 +26,8 @@ from src.simulation_visualizer import GridVisualizer
 
 class SharedScenarioTests(unittest.TestCase):
     def test_every_experiment_kpi_has_exactly_one_subject(self):
-        expected = set(METRICS) | set(EMISSION_PAIR_METRICS) | set(INTEGRATED_EXPERIENCE_METRICS)
+        expected = (set(METRICS) | set(EMISSION_PAIR_METRICS) |
+                    set(DRIVER_PAIR_METRICS) | set(INTEGRATED_EXPERIENCE_METRICS))
         self.assertEqual(len(INTEGRATED_EXPERIENCE_METRICS),
                          len(set(INTEGRATED_EXPERIENCE_METRICS)))
         registered = [metric for metrics in KPI_SUBJECTS.values() for metric in metrics]
@@ -33,7 +35,12 @@ class SharedScenarioTests(unittest.TestCase):
         self.assertEqual(len(registered), len(set(registered)))
         self.assertEqual(KPI_SUBJECT["food_completion_rate"], "customer")
         self.assertEqual(KPI_SUBJECT["service_units_per_driver_hour"], "driver")
+        self.assertEqual(KPI_SUBJECT["driver_food_pickup_wait_saved_ticks"], "driver")
         self.assertEqual(KPI_SUBJECT["merchant_revenue_per_order"], "merchant")
+        self.assertEqual(KPI_SUBJECT["mean_food_preparation_queue_ticks"], "merchant")
+        self.assertEqual(
+            KPI_SUBJECT["mean_integrated_grocery_preparation_queue_ticks"], "merchant")
+        self.assertEqual(KPI_SUBJECT["mean_food_ready_to_handover_ticks"], "merchant")
         self.assertEqual(KPI_SUBJECT["platform_revenue_per_order"], "platform")
         self.assertEqual(KPI_SUBJECT["emission_intensity_per_service_unit"], "environment")
 
@@ -170,7 +177,7 @@ class SharedScenarioTests(unittest.TestCase):
             self.assertIsNone(before.grocery)
             self.assertIsNotNone(after.grocery)
         self.assertEqual(baseline._metadata()["experiment_scenario"]["sha256"], scenario.sha256)
-        self.assertEqual(baseline._metadata()["schema_version"], 9)
+        self.assertEqual(baseline._metadata()["schema_version"], 16)
 
     def test_preparation_multipliers_and_nearest_store_rules(self):
         scenario = build_experiment_scenario(42, daily_customers=24, num_drivers=2)
@@ -227,6 +234,8 @@ class SharedScenarioTests(unittest.TestCase):
                 statistics = list(csv.DictReader(handle))
             with (output_dir / "emission_statistics.csv").open(newline="", encoding="utf-8") as handle:
                 emission_statistics = list(csv.DictReader(handle))
+            with (output_dir / "driver_statistics.csv").open(newline="", encoding="utf-8") as handle:
+                driver_statistics = list(csv.DictReader(handle))
             with (output_dir / "service_level_statistics.csv").open(newline="", encoding="utf-8") as handle:
                 service_statistics = list(csv.DictReader(handle))
             manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
@@ -234,12 +243,21 @@ class SharedScenarioTests(unittest.TestCase):
             self.assertEqual(len(runs), 4)
             self.assertEqual(len(pairs), 2)
             self.assertEqual(len(manifest["scenario_records"]), 2)
-            self.assertEqual(manifest["experiment_schema_version"], 13)
+            self.assertEqual(manifest["experiment_schema_version"], 17)
             self.assertEqual(manifest["kpi_taxonomy"],
                              "subject-centric; research questions select metrics across subjects")
             self.assertEqual(manifest["kpi_subjects"]["customer"][0], "food_completion_rate")
+            self.assertIn("mean_food_preparation_queue_ticks", runs[0])
+            self.assertIn("mean_integrated_grocery_preparation_queue_ticks", runs[0])
+            self.assertIn(
+                "mean_food_preparation_queue_ticks", manifest["kpi_subjects"]["merchant"])
+            self.assertIn(
+                "mean_integrated_grocery_preparation_queue_ticks",
+                manifest["kpi_subjects"]["merchant"],
+            )
             self.assertTrue(all(row["subject"] for row in statistics))
             self.assertTrue(all(row["subject"] for row in emission_statistics))
+            self.assertTrue(all(row["subject"] == "driver" for row in driver_statistics))
             self.assertTrue(all(row["subject"] for row in service_statistics))
             self.assertEqual(manifest["experiment_log"], "experiment.log")
             self.assertIn("experiment_started", experiment_log)
@@ -263,6 +281,10 @@ class SharedScenarioTests(unittest.TestCase):
                 "service_output_change_pct", "total_emission_change_pct",
                 "emission_output_elasticity",
             })
+            self.assertEqual({row["metric"] for row in driver_statistics}, set(DRIVER_PAIR_METRICS))
+            self.assertTrue(any(row["metric"] == "driver_food_pickup_wait_saved_ticks" and
+                                row["primary_driver_metric"] == "True"
+                                for row in driver_statistics))
             self.assertIn("integrated_completion_rate", {row["metric"] for row in service_statistics})
             self.assertIn("mean_integrated_completion_ticks", {row["metric"] for row in service_statistics})
             self.assertFalse(any(row["metric"].startswith("p90_") for row in service_statistics))
@@ -272,6 +294,11 @@ class SharedScenarioTests(unittest.TestCase):
             self.assertTrue(any(row["metric"] == "mean_food_completion_ticks" and
                                 row["primary_metric"] == "True" for row in statistics))
             for pair in pairs:
+                if pair["baseline_mean_food_pickup_wait_ticks"] and pair["integrated_mean_food_pickup_wait_ticks"]:
+                    expected_saved = (float(pair["baseline_mean_food_pickup_wait_ticks"]) -
+                                      float(pair["integrated_mean_food_pickup_wait_ticks"]))
+                    self.assertAlmostEqual(float(pair["driver_food_pickup_wait_saved_ticks"]),
+                                           expected_saved)
                 delta_emission = (float(pair["integrated_total_emission_units"]) -
                                   float(pair["baseline_total_emission_units"]))
                 completed_grocery = next(

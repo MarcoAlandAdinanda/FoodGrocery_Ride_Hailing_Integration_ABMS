@@ -80,7 +80,7 @@ following Store → Restaurant → Customer.
 
 Outputs under `output/experiments` include one scenario per replication;
 `run_summaries.csv`, `paired_differences.csv`, `paired_statistics.csv`,
-`emission_statistics.csv`, `service_level_statistics.csv`,
+`emission_statistics.csv`, `driver_statistics.csv`, `service_level_statistics.csv`,
 `sensitivity_effects.csv`, `manifest.json`, and `experiment.log`. The log records
 the experiment configuration, seed and scenario progress, the start and final
 KPI summary of every condition, failures with a traceback, completion of every
@@ -124,6 +124,13 @@ Restaurants, 15 Stores, a 15-minute assignment timeout, a 30-minute handover
 timeout and a 1440-tick horizon remain fixed.
 Use the experiment controller for batch runs.
 
+Setiap Restaurant dan Grocery Store memiliki satu server preparasi dengan antrean
+FIFO berdasarkan tick pembuatan lalu ID order. Komponen baru berstatus `QUEUED`
+hingga mendapat giliran. Setelah komponen di depan selesai preparasi dan menjadi
+`READY`, komponen berikutnya dapat mulai; merchant tidak menunggu Driver mengambil
+komponen yang sudah siap. Durasi preparasi dihitung sejak
+`preparation_started_tick`, bukan sejak order dibuat.
+
 ## Jarak dan gerak empat arah
 
 Baseline 13 September 2026 menggunakan Manhattan, yaitu `abs(dx) + abs(dy)`,
@@ -137,10 +144,11 @@ Skor ini menentukan arah saja, bukan kilometer yang diakumulasikan.
 Jarak tarif adalah 0,5 kali jumlah Manhattan Restaurant–Customer dan, untuk
 integrated, Manhattan Store–Restaurant. Pickup pertama dari posisi driver tidak
 ditagihkan. Quote dibuat saat order lahir, dengan ongkir
-`max(9000, 2250 * billable_distance_km)` tanpa pembulatan kilometer. Nilai
-Rp9.000 dan Rp2.250/km adalah titik tengah rentang Zona I KP 667/2022 yang
-dipakai sebagai proxy generik jasa sepeda motor berbasis aplikasi, bukan tarif
-resmi GrabFood atau platform tertentu. Seluruh ongkir menjadi revenue bruto
+`10200 + max(0, billable_distance_km - 4) * 2550` tanpa pembulatan kilometer,
+mengikuti Zona II (Jabodetabek) KP 667 Tahun 2022. Tarif minimal Rp10.200
+mencakup jarak sampai dengan 4 km; tambahan Rp2.550/km baru dikenakan pada
+kelebihan jarak di atas 4 km. Karena satu langkah grid adalah 0,5 km, tambahan
+pertama muncul pada jarak 4,5 km. Seluruh ongkir menjadi revenue bruto
 Driver karena data publik payout delivery spesifik platform tidak tersedia;
 biaya seluruh gerak aktual tetap mengurangi profit Driver.
 Sebaliknya, jarak aktual mencakup seluruh perpindahan yang sudah terjadi,
@@ -178,10 +186,22 @@ karena observasinya menghitung aktivasi Driver yang menunggu handover.
 
 Controller menyimpan taksonomi kanonis dalam `manifest.json` pada
 `kpi_subjects`. Tabel statistik berformat panjang (`paired_statistics.csv`,
-`emission_statistics.csv`, `service_level_statistics.csv`, dan
+`emission_statistics.csv`, `driver_statistics.csv`, `service_level_statistics.csv`, dan
 `sensitivity_effects.csv`) membawa kolom `subject`. Label primary/secondary dan
 metode paired/condition-only merupakan atribut analisis yang terpisah dari
 subjek KPI.
+
+KPI utama penghematan antrean Driver adalah
+`driver_food_pickup_wait_saved_ticks`, yang dihitung per replikasi sebagai
+`baseline_mean_food_pickup_wait_ticks - integrated_mean_food_pickup_wait_ticks`.
+Nilai positif berarti integrasi menghemat waktu tunggu pickup food; nilai negatif
+berarti waktu tunggu bertambah. KPI relatif
+`driver_food_pickup_wait_saved_pct` menggunakan pickup wait baseline sebagai
+penyebut dan dibiarkan kosong bila baseline nol atau tidak terobservasi. Keduanya
+tersedia per pasangan di `paired_differences.csv` dan diringkas beserta interval
+bootstrap serta uji berpasangan di `driver_statistics.csv`. Tidak dibuat KPI
+penghematan pickup grocery karena baseline food-only tidak mempunyai pickup
+grocery yang sebanding.
 
 Setiap run menghasilkan direktori baru di `output/simulations`. `--output-dir`
 dapat menunjuk direktori baru atau kosong; keluaran yang sudah ada tidak ditimpa.
@@ -192,7 +212,7 @@ dengan akhiran `_reset_1`, `_reset_2`, dan seterusnya.
 |---|---|
 | `kpi_ticks.csv` | KPI akhir setiap tick dan urutan aktivasi Driver |
 | `orders.csv` | Semua order, timestamp, quote pembayaran, status dan settlement |
-| `components.csv` | Komponen food/grocery, persiapan, handover, dan event pembatalan |
+| `components.csv` | Komponen food/grocery, antrean dan persiapan, handover, serta event pembatalan |
 | `drivers.csv` | Posisi/status akhir, pekerjaan, perjalanan, utilisasi, revenue dan profit |
 | `merchants.csv` | Posisi/status akhir, komponen, event pembatalan, KPI pembatalan PREPARING dan revenue merchant |
 | `summary.json` | Rekap akhir/parsial termasuk agregat KPI pembatalan restaurant/store |
@@ -232,6 +252,17 @@ Pada keluaran eksperimen, seluruh KPI food memakai nama kanonis berawalan
 `food_`: `food_completion_rate`, `food_cancellation_rate`,
 `food_unfinished_rate`, `mean_food_completion_ticks`,
 `mean_food_pickup_wait_ticks`, dan `mean_food_post_pickup_delivery_ticks`.
+`mean_food_ready_to_handover_ticks` mencatat waktu sisi Merchant sejak komponen
+food `READY` sampai `HANDED_OVER`. Untuk grocery integrated, metrik sejajarnya
+adalah `mean_integrated_grocery_ready_to_handover_ticks`.
+KPI diagnostik `mean_food_preparation_queue_ticks` mengukur rata-rata waktu
+komponen food menunggu dari `created_tick` sampai `preparation_started_tick`.
+Untuk grocery pada order integrated, metrik sejajarnya adalah
+`mean_integrated_grocery_preparation_queue_ticks`. Mean hanya menggunakan
+komponen yang sudah mulai dipersiapkan; jumlah observasinya tersedia melalui
+`observed_food_preparation_queue_ticks_count` dan
+`observed_grocery_preparation_queue_ticks_count`. Komponen yang masih `QUEUED`
+atau dibatalkan sebelum preparasi dimulai tidak dipaksakan menjadi observasi nol.
 Nama generik lama `completion_rate`,
 `cancellation_rate`, `active_rate`, dan `mean_completion_ticks` tidak lagi
 ditulis ke tabel eksperimen. Perubahan ini menghilangkan alias yang sebelumnya
@@ -240,11 +271,15 @@ bernilai sama hanya karena semua order dalam model mengandung food.
 - Assignment waiting: `assigned - created`.
 - Delivery service: `delivered - created`.
 - Acknowledgement delay: `completed - delivered`.
+- Ready-to-handover: `handed_over_tick - ready_tick`; hanya terobservasi setelah
+  handover dan berbeda dari pickup wait Driver.
 - Completion total: `completed - created`.
 - Cancellation waiting: `cancelled - created`.
 - Pickup waiting: jumlah aktivasi pickup yang belum menerima handover. Rata-rata
   menggunakan pickup yang sudah selesai; kolom `*_so_far` juga menyertakan
   penantian order yang masih berlangsung.
+- Preparation queue: `preparation_started_tick - created_tick`; hanya terobservasi
+  setelah komponen mulai dipersiapkan dan merupakan waktu sisi Merchant.
 - Utilisasi: tick sibuk dibagi tick yang telah dijalankan. Tick berhasil claim,
   perjalanan, pickup, dan delivery termasuk sibuk.
 
@@ -257,6 +292,37 @@ Rekonsiliasi status: generated = available + assigned + delivered + completed +
 cancelled. Active = available + assigned + delivered. Revenue hanya diposting
 sekali saat COMPLETED; `customer_payment` adalah quote, bukan bukti settlement.
 `settled_customer_payment` hanya menjumlahkan order yang sudah COMPLETED.
+
+Untuk `Pf` sebagai harga makanan, `Pg` sebagai harga grocery (nol pada order
+food-only), dan `Df` sebagai ongkir, quote customer dihitung dengan rumus:
+
+`CustomerPayment = Df + Pf + Pg + 0.1 * (Pf + Pg) + 0.1801 * 1.11 * (Pf + Pg)`.
+
+Komponen `0.1 * (Pf + Pg)` disimpan sebagai `tax` untuk kompatibilitas skema
+order dan merepresentasikan Pb1. Komponen
+`0.1801 * 1.11 * (Pf + Pg)` disimpan sebagai
+`platform_commission_charge`, yaitu komisi platform 0,1801 yang dikalikan
+multiplier PPN 1,11. Semua komponen menggunakan nilai `Decimal` tanpa
+pembulatan antara.
+
+Revenue Merchant menggunakan parameter yang sama:
+
+`MerchantRevenue = Pf + Pg + 0.1 * (Pf + Pg) - 0.1801 * 1.11 * (Pf + Pg)`.
+
+Settlement dihitung per komponen agar revenue Restaurant dan Grocery Store
+masuk ke agen masing-masing. Karena rumusnya linear, jumlah settlement kedua
+komponen tepat sama dengan penerapan rumus tersebut pada `Pf + Pg`.
+
+Dengan `Cpd = 0,08`, revenue Driver dan Platform dihitung sebagai:
+
+- `DriverRevenue = (1 - 0.08) * Df`.
+- `PlatformRevenue = 0.1801 * 1.11 * (Pf + Pg) + 0.08 * Df`.
+
+Revenue Platform dihitung langsung dari formula tersebut, bukan sebagai residual
+`CustomerPayment - DriverRevenue - MerchantRevenue`. Dengan kombinasi formula
+yang ditetapkan, `CustomerPayment` melebihi jumlah ketiga revenue sebesar
+`0.1801 * 1.11 * (Pf + Pg)`; selisih ini dipertahankan secara eksplisit dan tidak
+dimasukkan kembali ke revenue Platform.
 
 Perhitungan uang menggunakan Decimal tanpa pembulatan antara. Uang dalam JSON
 disimpan sebagai string desimal agar presisi terjaga; CSV menyimpan teks desimal
@@ -280,6 +346,8 @@ sehingga pembacaan atau ekspor berulang tidak menggandakan hitungan.
 pencatatan. Pada order integrated, status food/grocery dievaluasi independen;
 hanya merchant dengan komponen yang masih PREPARING yang dihitung. Pembatalan
 READY tetap tercatat sebagai food disposal atau grocery return.
+Komponen yang dibatalkan saat masih `QUEUED` memakai event `QUEUE_CANCELLED` dan
+tidak masuk KPI pembatalan saat persiapan karena produk belum mulai diproses.
 
 `kpi_ticks.csv` dan `summary.json` menyediakan agregat terpisah dengan awalan
 `restaurant_` dan `store_` untuk kedua nama KPI tersebut. Tanpa pembatalan
@@ -295,13 +363,26 @@ nol walaupun ada pembatalan READY.
 
 Ini adalah pencatatan nilai produk yang dibatalkan sebagai KPI agen; tidak ada
 mekanisme pembayar, pembayaran kompensasi, atau refund. KPI tidak mengubah
-revenue/profit. Rumus pajak dan revenue tetap mengikuti asumsi model PDF.
+revenue/profit. Rumus pembayaran customer dan revenue mengikuti asumsi model.
 
-Metadata standalone menggunakan `schema_version: 8`; run dengan shared experiment
-scenario menggunakan skema 9. Kenaikan versi ini mengganti satu field
-`timeout_ticks` dengan `assignment_timeout_ticks` dan
-`handover_timeout_ticks`. Manifest controller menggunakan
-`experiment_schema_version: 13`. Versi 13 mengganti seluruh metrik waktu P90
+Metadata standalone menggunakan `schema_version: 15`; run dengan shared experiment
+scenario menggunakan skema 16. Versi ini menambahkan KPI diagnostik preparation
+queue duration pada Merchant. Versi sebelumnya mengganti revenue Platform dari
+perhitungan residual menjadi formula langsung Cpm–PPN dan Cpd, serta mencatat
+formula revenue Driver secara eksplisit. Versi sebelumnya mengganti formula
+revenue Merchant dan menghapus parameter komisi merchant lama yang tidak lagi
+digunakan. Versi lebih awal menambahkan komponen `platform_commission_charge` dan parameter Pb1,
+Cpm, serta multiplier PPN; versi lebih awal menambahkan parameter tarif
+`delivery_included_distance_km`.
+Versi lebih awal menambahkan metrik
+ready-to-handover dan status `QUEUED`,
+`preparation_started_tick`, dan semantik preparasi FIFO single-server. Manifest
+controller menggunakan `experiment_schema_version: 17`. Versi 17 menambahkan KPI
+penghematan pickup-wait food Driver berbasis pasangan baseline–integrated dan
+`driver_statistics.csv`; versi 16 menambahkan KPI
+diagnostik preparation queue duration; versi 15 menambahkan metrik
+ready-to-handover; versi 14 membawa perubahan antrean merchant tersebut;
+versi 13 mengganti seluruh metrik waktu P90
 dengan mean aritmetika atas observasi order yang tersedia. Versi 12 menambahkan jumlah Store ke desain
 faktorial penuh 3 x 3 x 3 dan menggunakan posisi Store bertingkat; versi 11
 mengubah probabilitas integrasi dan kebijakan Store menjadi faktorial; versi 10 menambahkan taksonomi KPI berdasarkan
@@ -311,7 +392,8 @@ p-value mentah, koreksi Holm, keputusan pada alpha 0,05, dan Cohen's `d_z`.
 Versi 7 menstandarkan nama KPI food pada tabel eksperimen dan menghapus alias
 service-level generik. Perubahan skema sebelumnya
 mencatat KPI produktivitas, emisi, service level dua dimensi, serta parameter tarif
-`delivery_minimum_fee`, `delivery_fee_per_km`, dan
+`delivery_minimum_fee`, `delivery_included_distance_km`,
+`delivery_fee_per_km`, dan
 `driver_delivery_fee_share`. Field compensation lama pada order,
 komponen, merchant, dan rekap diganti dengan KPI serta kebijakan
 `cancellation_accounting`; status UNRESOLVED untuk compensation tidak dipakai
@@ -333,7 +415,8 @@ ada komponen yang belum `HANDED_OVER`. Pemeriksaan deadline terjadi sebelum
 aktivasi Merchant dan Driver, sehingga deadline menang atas matching atau
 handover yang baru mungkin terjadi pada tick batas. Setelah seluruh komponen
 `HANDED_OVER`, timeout kedua tidak lagi berlaku. Persiapan siap pada
-`created + duration`, termasuk durasi nol.
+`preparation_started_tick + preparation_duration`, termasuk durasi nol. Status
+`READY` langsung membebaskan server preparasi meskipun Driver belum datang.
 
 Hanya cabang state awal Driver yang dieksekusi per tick. Karena merchant aktif
 sebelum Driver, kedatangan pada tick t baru bisa menerima handover pada tick

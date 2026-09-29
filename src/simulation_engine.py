@@ -38,9 +38,10 @@ if __package__:
         ASSIGNMENT_TIMEOUT, HANDOVER_TIMEOUT,
         DEFAULT_SEED, P_INTEGRATION, KM_PER_STEP, COST_PER_STEP, EMISSION_PER_STEP,
         FOOD_PREPARATION, FOOD_ITEM_VALUE, GROCERY_PREPARATION,
-        GROCERY_ITEM_VALUE, DELIVERY_MINIMUM_FEE, DELIVERY_FEE_PER_KM,
-        TAX_RATE, DRIVER_PLATFORM_SHARE, DRIVER_DELIVERY_FEE_SHARE,
-        MERCHANT_PLATFORM_SHARE,
+        GROCERY_ITEM_VALUE, DELIVERY_MINIMUM_FEE, DELIVERY_INCLUDED_DISTANCE_KM,
+        DELIVERY_FEE_PER_KM,
+        PB1_RATE, CUSTOMER_PLATFORM_COMMISSION_RATE, PPN_MULTIPLIER,
+        DRIVER_PLATFORM_SHARE, DRIVER_DELIVERY_FEE_SHARE,
     )
 else:
     from simulation_parameters import (
@@ -49,9 +50,10 @@ else:
         ASSIGNMENT_TIMEOUT, HANDOVER_TIMEOUT,
         DEFAULT_SEED, P_INTEGRATION, KM_PER_STEP, COST_PER_STEP, EMISSION_PER_STEP,
         FOOD_PREPARATION, FOOD_ITEM_VALUE, GROCERY_PREPARATION,
-        GROCERY_ITEM_VALUE, DELIVERY_MINIMUM_FEE, DELIVERY_FEE_PER_KM,
-        TAX_RATE, DRIVER_PLATFORM_SHARE, DRIVER_DELIVERY_FEE_SHARE,
-        MERCHANT_PLATFORM_SHARE,
+        GROCERY_ITEM_VALUE, DELIVERY_MINIMUM_FEE, DELIVERY_INCLUDED_DISTANCE_KM,
+        DELIVERY_FEE_PER_KM,
+        PB1_RATE, CUSTOMER_PLATFORM_COMMISSION_RATE, PPN_MULTIPLIER,
+        DRIVER_PLATFORM_SHARE, DRIVER_DELIVERY_FEE_SHARE,
     )
 
 SPECIFICATION_PDF = ROOT / "source" / "Integrated_Food_Grocery_Delivery_Model_Documentation.pdf"
@@ -59,10 +61,18 @@ DEFAULT_OUTPUT_ROOT = ROOT / "output" / "simulations"
 ZERO = Decimal("0")
 FINANCIAL_NOTE = (
     "PREPARING cancellations are recorded as merchant unit and product-value KPIs only. "
-    "One food/grocery component is one unit; product value is item_value before tax/fees. "
+    "One food/grocery component is one unit; product value is item_value before Pb1/fees. "
     "These KPIs do not post payments or change revenue/profit. "
-    "Tax and revenue equations are model assumptions from the specification."
+    "Customer-payment and revenue equations are model assumptions from the specification."
 )
+
+
+def calculate_delivery_fee(distance_km: Decimal) -> Decimal:
+    """Return the Zone II fee: minimum fare plus distance above the first 4 km."""
+    return DELIVERY_MINIMUM_FEE + max(
+        ZERO,
+        distance_km - DELIVERY_INCLUDED_DISTANCE_KM,
+    ) * DELIVERY_FEE_PER_KM
 
 
 class OrderStatus(StrEnum):
@@ -74,6 +84,7 @@ class OrderStatus(StrEnum):
 
 
 class ComponentStatus(StrEnum):
+    QUEUED = "QUEUED"
     PREPARING = "PREPARING"
     READY = "READY"
     HANDED_OVER = "HANDED_OVER"
@@ -264,10 +275,13 @@ def manhattan(a: tuple[int, int], b: tuple[int, int]) -> int:
 
 
 def merchant_revenue(item_value: int) -> Decimal:
-    """Merchant gross proceeds less the common modeled platform share."""
+    """Return merchant settlement after Pb1 and the PPN-adjusted commission."""
     value = Decimal(item_value)
-    gross_proceeds = value * (1 + TAX_RATE)
-    return gross_proceeds * (1 - MERCHANT_PLATFORM_SHARE)
+    return (
+        value
+        + PB1_RATE * value
+        - CUSTOMER_PLATFORM_COMMISSION_RATE * PPN_MULTIPLIER * value
+    )
 
 
 def elapsed(end: int | None, start: int | None) -> int | None:
@@ -287,7 +301,8 @@ class MerchantOrderComponent:
     created_tick: int
     preparation_duration: int
     item_value: int
-    status: ComponentStatus = ComponentStatus.PREPARING
+    status: ComponentStatus = ComponentStatus.QUEUED
+    preparation_started_tick: int | None = None
     ready_tick: int | None = None
     handed_over_tick: int | None = None
     cancelled_tick: int | None = None
@@ -295,8 +310,10 @@ class MerchantOrderComponent:
     settled_revenue: Decimal = ZERO
 
     @property
-    def planned_ready_tick(self) -> int:
-        return self.created_tick + self.preparation_duration
+    def planned_ready_tick(self) -> int | None:
+        if self.preparation_started_tick is None:
+            return None
+        return self.preparation_started_tick + self.preparation_duration
 
 
 @dataclass
@@ -323,6 +340,7 @@ class Order:
     restaurant_to_customer_moves: int = 0
     billable_distance_km: Decimal = ZERO
     tax: Decimal = ZERO
+    platform_commission_charge: Decimal = ZERO
     delivery_fee: Decimal = ZERO
     customer_payment: Decimal = ZERO
     settled: bool = False
@@ -355,6 +373,16 @@ class Order:
                                        if self.food.handed_over_tick is not None else None),
             "grocery_pickup_wait_ticks": (self.grocery_pickup_wait_ticks if self.grocery is not None
                                           and self.grocery.handed_over_tick is not None else None),
+            "food_preparation_queue_ticks": elapsed(self.food.preparation_started_tick,
+                                                       self.food.created_tick),
+            "grocery_preparation_queue_ticks": (
+                elapsed(self.grocery.preparation_started_tick, self.grocery.created_tick)
+                if self.grocery is not None else None),
+            "food_ready_to_handover_ticks": elapsed(self.food.handed_over_tick,
+                                                      self.food.ready_tick),
+            "grocery_ready_to_handover_ticks": (
+                elapsed(self.grocery.handed_over_tick, self.grocery.ready_tick)
+                if self.grocery is not None else None),
         }
 
 
@@ -402,7 +430,8 @@ class Merchant(mesa.Agent):
 
     @property
     def state(self) -> MerchantState:
-        active = any(c.status in (ComponentStatus.PREPARING, ComponentStatus.READY)
+        active = any(c.status in (ComponentStatus.QUEUED, ComponentStatus.PREPARING,
+                                  ComponentStatus.READY)
                      for c in self.components.values())
         return MerchantState.ACTIVE if active else MerchantState.IDLE
 
@@ -417,21 +446,37 @@ class Merchant(mesa.Agent):
         }
 
     def step(self):
-        """PDF §1.10-1.12,1.14: parallel component processing, no capacity limit."""
-        for component in self.components.values():
+        """Process one FIFO preparation at a time; READY orders do not block the queue."""
+        tick = self.model.tick_counter
+        ordered = sorted(self.components.values(), key=lambda c: (c.created_tick, c.order_id))
+        for component in ordered:
             if component.status in (ComponentStatus.HANDED_OVER, ComponentStatus.CANCELLED):
                 continue
-            order = self.model.orders[component.order_id]
-            if order.status == OrderStatus.CANCELLED:
+            if self.model.orders[component.order_id].status == OrderStatus.CANCELLED:
                 self._handle_timeout(component)
-                continue
-            if (component.status == ComponentStatus.PREPARING
-                    and self.model.tick_counter >= component.planned_ready_tick):
-                component.status = ComponentStatus.READY
-                component.ready_tick = self.model.tick_counter
+
+        preparing = next((c for c in ordered if c.status == ComponentStatus.PREPARING), None)
+        if preparing is not None and tick >= preparing.planned_ready_tick:
+            preparing.status = ComponentStatus.READY
+            preparing.ready_tick = tick
+
+        # Consecutive zero-duration jobs finish without an artificial one-tick delay.
+        while not any(c.status == ComponentStatus.PREPARING for c in ordered):
+            queued = next((c for c in ordered if c.status == ComponentStatus.QUEUED), None)
+            if queued is None:
+                break
+            queued.status = ComponentStatus.PREPARING
+            queued.preparation_started_tick = tick
+            if queued.preparation_duration > 0:
+                break
+            queued.status = ComponentStatus.READY
+            queued.ready_tick = tick
+
+        for component in ordered:
+            order = self.model.orders[component.order_id]
             if self._can_handover(order, component):
                 component.status = ComponentStatus.HANDED_OVER
-                component.handed_over_tick = self.model.tick_counter
+                component.handed_over_tick = tick
 
     def _can_handover(self, order: Order, component: MerchantOrderComponent) -> bool:
         driver = self.model.drivers_by_id.get(order.assigned_driver_id)
@@ -451,8 +496,10 @@ class Merchant(mesa.Agent):
             component.cancellation_event = (
                 "PREPARED_FOOD_DISPOSAL" if self.kind == "FOOD" else "GROCERY_CANCELLATION_RETURN"
             )
-        else:
+        elif component.status == ComponentStatus.PREPARING:
             component.cancellation_event = "PREPARATION_STOPPED"
+        else:
+            component.cancellation_event = "QUEUE_CANCELLED"
         component.status = ComponentStatus.CANCELLED
         component.cancelled_tick = self.model.tick_counter
 
@@ -724,13 +771,18 @@ class IntegratedDeliveryModel(mesa.Model):
         if store is not None:
             billable_steps += manhattan(store.pos, restaurant.pos)
         order.billable_distance_km = billable_steps * KM_PER_STEP
-        order.delivery_fee = max(
-            DELIVERY_MINIMUM_FEE,
-            DELIVERY_FEE_PER_KM * order.billable_distance_km,
-        )
+        order.delivery_fee = calculate_delivery_fee(order.billable_distance_km)
         item_total = sum(c.item_value for c in order.components)
-        order.tax = TAX_RATE * item_total
-        order.customer_payment = item_total + order.tax + order.delivery_fee
+        order.tax = PB1_RATE * item_total
+        order.platform_commission_charge = (
+            CUSTOMER_PLATFORM_COMMISSION_RATE * PPN_MULTIPLIER * item_total
+        )
+        order.customer_payment = (
+            order.delivery_fee
+            + item_total
+            + order.tax
+            + order.platform_commission_charge
+        )
         customer.order_id = order_id
         self.customers[customer.unique_id] = customer
         self.orders[order_id] = order
@@ -744,12 +796,15 @@ class IntegratedDeliveryModel(mesa.Model):
         driver = self.drivers_by_id[order.assigned_driver_id]
         order.driver_revenue = order.delivery_fee * DRIVER_DELIVERY_FEE_SHARE
         driver.revenue += order.driver_revenue
-        merchant_total = ZERO
+        item_total = ZERO
         for component in order.components:
             component.settled_revenue = merchant_revenue(component.item_value)
             self.merchants_by_id[component.merchant_id].revenue += component.settled_revenue
-            merchant_total += component.settled_revenue
-        order.platform_revenue = order.customer_payment - order.driver_revenue - merchant_total
+            item_total += Decimal(component.item_value)
+        order.platform_revenue = (
+            CUSTOMER_PLATFORM_COMMISSION_RATE * PPN_MULTIPLIER * item_total
+            + DRIVER_PLATFORM_SHARE * order.delivery_fee
+        )
         self.platform_revenue += order.platform_revenue
         order.settled = True
         order.settlement_tick = self.tick_counter
@@ -873,6 +928,14 @@ class IntegratedDeliveryModel(mesa.Model):
                                         if o.food.handed_over_tick is not None]
         integrated_grocery_pickup_waits = [o.grocery_pickup_wait_ticks for o in integrated_orders
                                            if o.grocery is not None and o.grocery.handed_over_tick is not None]
+        integrated_grocery_preparation_queues = [
+            elapsed(o.grocery.preparation_started_tick, o.grocery.created_tick)
+            for o in integrated_orders if o.grocery is not None
+        ]
+        integrated_grocery_ready_to_handover = [
+            elapsed(o.grocery.handed_over_tick, o.grocery.ready_tick)
+            for o in integrated_orders if o.grocery is not None
+        ]
         metrics.update({
             "food_completion_rate": len(completed_orders) / len(orders) if orders else None,
             "food_cancellation_rate": statuses[OrderStatus.CANCELLED] / len(orders) if orders else None,
@@ -891,6 +954,10 @@ class IntegratedDeliveryModel(mesa.Model):
             "mean_integrated_completion_ticks": mean_observed(integrated_completion_ticks),
             "mean_integrated_food_pickup_wait_ticks": mean_observed(integrated_food_pickup_waits),
             "mean_integrated_grocery_pickup_wait_ticks": mean_observed(integrated_grocery_pickup_waits),
+            "mean_integrated_grocery_preparation_queue_ticks": mean_observed(
+                integrated_grocery_preparation_queues),
+            "mean_integrated_grocery_ready_to_handover_ticks": mean_observed(
+                integrated_grocery_ready_to_handover),
         })
         for state in DriverState:
             metrics[f"drivers_{state.value.lower()}"] = sum(d.state == state for d in self.drivers)
@@ -909,7 +976,9 @@ class IntegratedDeliveryModel(mesa.Model):
         time_keys = (
             "assignment_wait_ticks", "delivery_service_ticks", "acknowledgement_delay_ticks",
             "completion_total_ticks", "cancellation_wait_ticks", "food_pickup_wait_ticks",
-            "grocery_pickup_wait_ticks",
+            "grocery_pickup_wait_ticks", "food_preparation_queue_ticks",
+            "grocery_preparation_queue_ticks", "food_ready_to_handover_ticks",
+            "grocery_ready_to_handover_ticks",
         )
         for key in time_keys:
             values = [row[key] for row in time_rows]
@@ -1010,7 +1079,7 @@ class IntegratedDeliveryModel(mesa.Model):
             except PackageNotFoundError:
                 packages[name] = None
         return {
-            "schema_version": 9 if self.experiment_scenario is not None else 8,
+            "schema_version": 16 if self.experiment_scenario is not None else 15,
             "exported_at_utc": datetime.now(timezone.utc).isoformat(),
             "python_version": platform.python_version(), "libraries": packages,
             "config": {"p_integration": self.config.p_integration, "seed": self.config.seed,
@@ -1047,12 +1116,20 @@ class IntegratedDeliveryModel(mesa.Model):
             },
             "financial_parameters": {
                 "delivery_minimum_fee": DELIVERY_MINIMUM_FEE,
+                "delivery_included_distance_km": DELIVERY_INCLUDED_DISTANCE_KM,
                 "delivery_fee_per_km": DELIVERY_FEE_PER_KM,
-                "tax_rate": TAX_RATE,
+                "pb1_rate": PB1_RATE,
+                "customer_platform_commission_rate": CUSTOMER_PLATFORM_COMMISSION_RATE,
+                "ppn_multiplier": PPN_MULTIPLIER,
                 "driver_platform_share": DRIVER_PLATFORM_SHARE,
                 "driver_delivery_fee_share": DRIVER_DELIVERY_FEE_SHARE,
-                "merchant_platform_share": MERCHANT_PLATFORM_SHARE,
-                "merchant_share_basis": "item value plus modeled tax",
+                "driver_revenue_formula": "(1 - driver_platform_share) * delivery_fee",
+                "platform_revenue_formula": ("customer_platform_commission_rate * "
+                                             "ppn_multiplier * item total + "
+                                             "driver_platform_share * delivery_fee"),
+                "merchant_revenue_formula": ("item value + Pb1_rate * item value - "
+                                             "customer_platform_commission_rate * "
+                                             "ppn_multiplier * item value"),
             },
             "demand_input": {"path": str(self.config.demand_csv), "sha256": self.demand_sha256,
                              "hour_column": "hour", "weight_column": "avg_demand",
@@ -1067,7 +1144,10 @@ class IntegratedDeliveryModel(mesa.Model):
                                    else "NumPy model RNG permutation each tick"),
                 "hour_allocation": "largest remainder; earlier hour wins ties",
                 "minute_allocation": "divmod; random distinct minute slots for remainder",
-                "ready_tick": "created_tick + preparation_duration (zero allowed)",
+                "merchant_preparation_queue": ("single-server FIFO by creation tick then order ID; "
+                                               "the next component starts when preparation finishes, "
+                                               "without waiting for Driver pickup"),
+                "ready_tick": "preparation_started_tick + preparation_duration (zero allowed)",
                 "matching": "Manhattan to first merchant, creation tick, order ID",
                 "billable_distance": (f"{KM_PER_STEP} * (Manhattan Restaurant-Customer + "
                                       "Manhattan Store-Restaurant if integrated)"),
@@ -1090,6 +1170,10 @@ class IntegratedDeliveryModel(mesa.Model):
                 "cancellation_wait_ticks": "cancelled_tick - created_tick",
                 "pickup_wait_ticks": "unsatisfied pickup-state activations; observed mean only after handover",
                 "pickup_wait_ticks_so_far": "all unsatisfied pickup activations, including unfinished pickups",
+                "preparation_queue_ticks": ("preparation_started_tick - created_tick; merchant-side FIFO "
+                                             "queue duration, observed only after preparation starts"),
+                "ready_to_handover_ticks": ("handed_over_tick - ready_tick; merchant-side elapsed time "
+                                             "after preparation, observed only after handover"),
                 "driver_utilization": "busy ticks / elapsed ticks (fleet: sum / drivers / elapsed ticks)",
                 "completed_service_units": "one food unit per COMPLETED order plus one grocery unit per COMPLETED integrated order; equal unweighted units",
                 "service_units_per_driver_hour": "completed_service_units / (drivers * elapsed_ticks / 60)",
@@ -1104,6 +1188,9 @@ class IntegratedDeliveryModel(mesa.Model):
                 "missing_values": "CSV blank / JSON null; no zero substitution for unobserved metrics",
                 "money_encoding": "exact Decimal values; CSV decimal text / JSON strings, unrounded",
                 "customer_payment": "quoted payment; settled_customer_payment includes only COMPLETED orders",
+                "customer_payment_formula": ("delivery_fee + item_total + Pb1_rate * item_total + "
+                                             "customer_platform_commission_rate * ppn_multiplier * "
+                                             "item_total"),
                 "emission_units": "model units per PDF; no physical mass unit inferred",
             },
             "hourly_weights": self.hourly_weights.tolist(),
@@ -1138,7 +1225,9 @@ class IntegratedDeliveryModel(mesa.Model):
             order_columns.append(f"{kind}_pickup_wait_ticks_so_far")
         order_columns += ["assignment_wait_ticks", "delivery_service_ticks", "acknowledgement_delay_ticks",
                           "completion_total_ticks", "cancellation_wait_ticks", "food_pickup_wait_ticks",
-                          "grocery_pickup_wait_ticks", "customer_x", "customer_y", "restaurant_id", "store_id",
+                          "grocery_pickup_wait_ticks", "food_preparation_queue_ticks",
+                          "grocery_preparation_queue_ticks", "food_ready_to_handover_ticks",
+                          "grocery_ready_to_handover_ticks", "customer_x", "customer_y", "restaurant_id", "store_id",
                           "food_item_value", "grocery_item_value", "movement_count", "travel_distance_km",
                           "driver_operating_cost", "emission_units", "merchant_revenue", "driver_profit",
                           "active_at_export"]

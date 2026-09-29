@@ -45,6 +45,8 @@ METRICS = (
     "service_units_per_driver_hour", "service_units_per_busy_driver_hour", "service_units_per_km",
     "food_completion_rate", "food_cancellation_rate", "food_unfinished_rate",
     "mean_food_completion_ticks", "mean_food_pickup_wait_ticks",
+    "mean_food_preparation_queue_ticks",
+    "mean_food_ready_to_handover_ticks",
     "mean_food_post_pickup_delivery_ticks",
     "platform_revenue_per_order", "driver_revenue_per_order",
     "merchant_revenue_per_order", "driver_profit_per_order",
@@ -61,11 +63,16 @@ EMISSION_PAIR_METRICS = (
     "marginal_emission_per_additional_service_unit",
     "service_output_change_pct", "total_emission_change_pct", "emission_output_elasticity",
 )
+DRIVER_PAIR_METRICS = (
+    "driver_food_pickup_wait_saved_ticks", "driver_food_pickup_wait_saved_pct",
+)
 INTEGRATED_EXPERIENCE_METRICS = (
     "integrated_completion_rate", "mean_integrated_completion_ticks",
     "integrated_cancellation_rate", "integrated_unfinished_rate",
     "mean_integrated_food_pickup_wait_ticks",
     "mean_integrated_grocery_pickup_wait_ticks",
+    "mean_integrated_grocery_preparation_queue_ticks",
+    "mean_integrated_grocery_ready_to_handover_ticks",
 )
 
 # KPI ownership is organized by the subject whose outcome or resource is measured.
@@ -75,6 +82,7 @@ KPI_SUBJECTS = {
         "service_units_per_driver_hour", "service_units_per_busy_driver_hour",
         "service_units_per_km", "mean_food_pickup_wait_ticks",
         "mean_integrated_food_pickup_wait_ticks", "mean_integrated_grocery_pickup_wait_ticks",
+        "driver_food_pickup_wait_saved_ticks", "driver_food_pickup_wait_saved_pct",
         "driver_revenue_per_order",
         "driver_profit_per_order", "driver_utilization", "driver_profit_per_driver",
     ),
@@ -84,7 +92,11 @@ KPI_SUBJECTS = {
         "integrated_completion_rate", "mean_integrated_completion_ticks",
         "integrated_cancellation_rate", "integrated_unfinished_rate",
     ),
-    "merchant": ("merchant_revenue_per_order",),
+    "merchant": (
+        "merchant_revenue_per_order", "mean_food_preparation_queue_ticks",
+        "mean_integrated_grocery_preparation_queue_ticks", "mean_food_ready_to_handover_ticks",
+        "mean_integrated_grocery_ready_to_handover_ticks",
+    ),
     "platform": ("platform_revenue_per_order",),
     "environment": (
         "emission_intensity_per_service_unit", "total_emission_units",
@@ -156,6 +168,8 @@ def _metric_values(summary: dict, num_drivers: int) -> dict[str, float | None]:
         "mean_food_post_pickup_delivery_ticks": summary["mean_food_post_pickup_delivery_ticks"],
         **{metric: summary[metric] for metric in INTEGRATED_EXPERIENCE_METRICS},
         "mean_food_pickup_wait_ticks": summary["mean_food_pickup_wait_ticks"],
+        "mean_food_preparation_queue_ticks": summary["mean_food_preparation_queue_ticks"],
+        "mean_food_ready_to_handover_ticks": summary["mean_food_ready_to_handover_ticks"],
         "platform_revenue_per_order": float(Decimal(summary["platform_revenue"]) / generated),
         "driver_revenue_per_order": float(Decimal(summary["driver_revenue"]) / generated),
         "merchant_revenue_per_order": float(Decimal(summary["merchant_revenue"]) / generated),
@@ -453,6 +467,17 @@ def run_experiment(args: argparse.Namespace) -> Path:
             emission_change_pct = (delta_emission / baseline["total_emission_units"] * 100
                                    if baseline["total_emission_units"] else None)
             pair_row.update({
+                "driver_food_pickup_wait_saved_ticks": (
+                    baseline["mean_food_pickup_wait_ticks"] -
+                    treatment["mean_food_pickup_wait_ticks"]
+                    if baseline["mean_food_pickup_wait_ticks"] is not None and
+                    treatment["mean_food_pickup_wait_ticks"] is not None else None),
+                "driver_food_pickup_wait_saved_pct": (
+                    (baseline["mean_food_pickup_wait_ticks"] -
+                     treatment["mean_food_pickup_wait_ticks"]) /
+                    baseline["mean_food_pickup_wait_ticks"] * 100
+                    if baseline["mean_food_pickup_wait_ticks"] not in (None, 0) and
+                    treatment["mean_food_pickup_wait_ticks"] is not None else None),
                 "additional_service_units": additional_service_units,
                 "marginal_emission_per_completed_grocery": (
                     delta_emission / completed_grocery if completed_grocery else None),
@@ -525,6 +550,29 @@ def run_experiment(args: argparse.Namespace) -> Path:
     _write_csv(output_dir / "emission_statistics.csv", emission_statistical_rows,
                list(emission_statistical_rows[0]))
 
+    driver_statistical_rows = []
+    for condition in conditions:
+        if condition["p_integration"] == 0:
+            continue
+        condition_pairs = [row for row in pair_rows if row["condition_id"] == condition["condition_id"]]
+        for metric_index, metric in enumerate(DRIVER_PAIR_METRICS):
+            values = [row[metric] for row in condition_pairs if row[metric] is not None]
+            lower, upper = _bootstrap_interval(values, BOOTSTRAP_SEED_BASE + 250_000 + metric_index +
+                                               sum(ord(ch) for ch in condition["condition_id"]))
+            driver_statistical_rows.append({
+                "daily_customers": args.daily_customers, "num_drivers": args.num_drivers,
+                **condition, "primary_comparison": condition["condition_id"] ==
+                f"p_{args.p_integrated:g}_stores_{args.num_stores}_uniform",
+                "metric": metric, "subject": _kpi_subject(metric),
+                "primary_driver_metric": metric == "driver_food_pickup_wait_saved_ticks",
+                "observed_pairs": len(values),
+                "mean_value": float(np.mean(values)) if values else None,
+                "ci95_lower": lower, "ci95_upper": upper,
+                **_paired_significance(values),
+            })
+    _write_csv(output_dir / "driver_statistics.csv", driver_statistical_rows,
+               list(driver_statistical_rows[0]))
+
     service_level_rows = []
     for condition in conditions:
         if condition["p_integration"] == 0:
@@ -586,7 +634,7 @@ def run_experiment(args: argparse.Namespace) -> Path:
         _write_csv(output_dir / "sensitivity_effects.csv", sensitivity_rows, list(sensitivity_rows[0]))
 
     manifest = {
-        "experiment_schema_version": 13,
+        "experiment_schema_version": 17,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "baseline_p": 0.0, "integrated_p": args.p_integrated,
         "probabilities": sorted({c["p_integration"] for c in conditions if c["p_integration"] > 0}),
@@ -615,6 +663,7 @@ def run_experiment(args: argparse.Namespace) -> Path:
         "kpi_taxonomy": "subject-centric; research questions select metrics across subjects",
         "kpi_subjects": {subject: list(metrics) for subject, metrics in KPI_SUBJECTS.items()},
         "emission_pair_metrics": list(EMISSION_PAIR_METRICS),
+        "driver_pair_metrics": list(DRIVER_PAIR_METRICS),
         "integrated_experience_metrics": list(INTEGRATED_EXPERIENCE_METRICS),
         "statistics": ("integrated minus matching p=0 within each condition and replication; "
                        f"{BOOTSTRAP_RESAMPLES} paired bootstrap resamples, "
@@ -627,6 +676,9 @@ def run_experiment(args: argparse.Namespace) -> Path:
         "emission_statistics": ("paired total-emission change divided by completed grocery or positive net "
                                 "additional service units; percentage changes and emission-output elasticity; "
                                 "pointwise paired bootstrap intervals"),
+        "driver_statistics": ("paired food pickup-wait saved time, defined as matching food-only baseline "
+                              "minus integrated condition; positive values mean time saved; percentage is "
+                              "undefined when baseline pickup wait is zero or unobserved"),
         "service_level_statistics": ("condition-level integrated-customer experience across independently "
                                      "seeded day blocks; pointwise bootstrap intervals; food-service "
                                      "protection remains paired against food-only"),
