@@ -1,0 +1,441 @@
+{
+  "experiment_schema_version": 17,
+  "created_at_utc": "2026-09-29T13:36:59.172745+00:00",
+  "baseline_p": 0.0,
+  "integrated_p": 0.44,
+  "probabilities": [
+    0.22,
+    0.44,
+    0.66
+  ],
+  "store_selections": [
+    "uniform",
+    "nearest_restaurant",
+    "nearest_customer"
+  ],
+  "store_counts": [
+    10,
+    15,
+    20
+  ],
+  "sensitivity": true,
+  "conditions": [
+    {
+      "condition_id": "baseline",
+      "factor": "baseline",
+      "p_integration": 0.0,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 15,
+      "store_selection": "uniform"
+    },
+    {
+      "condition_id": "p_0.22_stores_10_uniform",
+      "factor": "factorial_cell",
+      "p_integration": 0.22,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 10,
+      "store_selection": "uniform"
+    },
+    {
+      "condition_id": "p_0.22_stores_10_nearest_restaurant",
+      "factor": "factorial_cell",
+      "p_integration": 0.22,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 10,
+      "store_selection": "nearest_restaurant"
+    },
+    {
+      "condition_id": "p_0.22_stores_10_nearest_customer",
+      "factor": "factorial_cell",
+      "p_integration": 0.22,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 10,
+      "store_selection": "nearest_customer"
+    },
+    {
+      "condition_id": "p_0.22_stores_15_uniform",
+      "factor": "factorial_cell",
+      "p_integration": 0.22,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 15,
+      "store_selection": "uniform"
+    },
+    {
+      "condition_id": "p_0.22_stores_15_nearest_restaurant",
+      "factor": "factorial_cell",
+      "p_integration": 0.22,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 15,
+      "store_selection": "nearest_restaurant"
+    },
+    {
+      "condition_id": "p_0.22_stores_15_nearest_customer",
+      "factor": "factorial_cell",
+      "p_integration": 0.22,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 15,
+      "store_selection": "nearest_customer"
+    },
+    {
+      "condition_id": "p_0.22_stores_20_uniform",
+      "factor": "factorial_cell",
+      "p_integration": 0.22,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 20,
+      "store_selection": "uniform"
+    },
+    {
+      "condition_id": "p_0.22_stores_20_nearest_restaurant",
+      "factor": "factorial_cell",
+      "p_integration": 0.22,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 20,
+      "store_selection": "nearest_restaurant"
+    },
+    {
+      "condition_id": "p_0.22_stores_20_nearest_customer",
+      "factor": "factorial_cell",
+      "p_integration": 0.22,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 20,
+      "store_selection": "nearest_customer"
+    },
+    {
+      "condition_id": "p_0.44_stores_10_uniform",
+      "factor": "factorial_cell",
+      "p_integration": 0.44,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 10,
+      "store_selection": "uniform"
+    },
+    {
+      "condition_id": "p_0.44_stores_10_nearest_restaurant",
+      "factor": "factorial_cell",
+      "p_integration": 0.44,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 10,
+      "store_selection": "nearest_restaurant"
+    },
+    {
+      "condition_id": "p_0.44_stores_10_nearest_customer",
+      "factor": "factorial_cell",
+      "p_integration": 0.44,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 10,
+      "store_selection": "nearest_customer"
+    },
+    {
+      "condition_id": "p_0.44_stores_15_uniform",
+      "factor": "factorial_cell",
+      "p_integration": 0.44,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 15,
+      "store_selection": "uniform"
+    },
+    {
+      "condition_id": "p_0.44_stores_15_nearest_restaurant",
+      "factor": "factorial_cell",
+      "p_integration": 0.44,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 15,
+      "store_selection": "nearest_restaurant"
+    },
+    {
+      "condition_id": "p_0.44_stores_15_nearest_customer",
+      "factor": "factorial_cell",
+      "p_integration": 0.44,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 15,
+      "store_selection": "nearest_customer"
+    },
+    {
+      "condition_id": "p_0.44_stores_20_uniform",
+      "factor": "factorial_cell",
+      "p_integration": 0.44,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 20,
+      "store_selection": "uniform"
+    },
+    {
+      "condition_id": "p_0.44_stores_20_nearest_restaurant",
+      "factor": "factorial_cell",
+      "p_integration": 0.44,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 20,
+      "store_selection": "nearest_restaurant"
+    },
+    {
+      "condition_id": "p_0.44_stores_20_nearest_customer",
+      "factor": "factorial_cell",
+      "p_integration": 0.44,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 20,
+      "store_selection": "nearest_customer"
+    },
+    {
+      "condition_id": "p_0.66_stores_10_uniform",
+      "factor": "factorial_cell",
+      "p_integration": 0.66,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 10,
+      "store_selection": "uniform"
+    },
+    {
+      "condition_id": "p_0.66_stores_10_nearest_restaurant",
+      "factor": "factorial_cell",
+      "p_integration": 0.66,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 10,
+      "store_selection": "nearest_restaurant"
+    },
+    {
+      "condition_id": "p_0.66_stores_10_nearest_customer",
+      "factor": "factorial_cell",
+      "p_integration": 0.66,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 10,
+      "store_selection": "nearest_customer"
+    },
+    {
+      "condition_id": "p_0.66_stores_15_uniform",
+      "factor": "factorial_cell",
+      "p_integration": 0.66,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 15,
+      "store_selection": "uniform"
+    },
+    {
+      "condition_id": "p_0.66_stores_15_nearest_restaurant",
+      "factor": "factorial_cell",
+      "p_integration": 0.66,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 15,
+      "store_selection": "nearest_restaurant"
+    },
+    {
+      "condition_id": "p_0.66_stores_15_nearest_customer",
+      "factor": "factorial_cell",
+      "p_integration": 0.66,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 15,
+      "store_selection": "nearest_customer"
+    },
+    {
+      "condition_id": "p_0.66_stores_20_uniform",
+      "factor": "factorial_cell",
+      "p_integration": 0.66,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 20,
+      "store_selection": "uniform"
+    },
+    {
+      "condition_id": "p_0.66_stores_20_nearest_restaurant",
+      "factor": "factorial_cell",
+      "p_integration": 0.66,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 20,
+      "store_selection": "nearest_restaurant"
+    },
+    {
+      "condition_id": "p_0.66_stores_20_nearest_customer",
+      "factor": "factorial_cell",
+      "p_integration": 0.66,
+      "food_preparation_multiplier": 1.0,
+      "grocery_preparation_multiplier": 1.0,
+      "num_stores": 20,
+      "store_selection": "nearest_customer"
+    }
+  ],
+  "reference_daily_customers": 300,
+  "reference_num_drivers": 12,
+  "reference_num_stores": 15,
+  "design": "full factorial of positive integration probabilities, Store counts, and Store-selection policies, plus one common p=0 food-only control; paired within replication",
+  "model_runs": 280,
+  "scenario_count": 10,
+  "scenario_generator": "factorial-v1; separate position streams for drivers, restaurants and stores",
+  "grid_interpretation": "Every positive integration-probability level is crossed with every Store count and Store-selection policy; Store positions are nested prefixes; preparation multipliers remain fixed at 1.",
+  "replications": 10,
+  "seed_start": 42,
+  "demand_csv": "D:\\UGM\\Skripsi\\FoodGrocery_Ride_Hailing_Integration_ABMS\\dataset\\food_hourly_demand_profile.csv",
+  "demand_sha256": "04feff3a2417f606d3d9204bf5400cf0e4da350b9f3aff15a85722b660517333",
+  "engine_sha256": "00927c49351fc5c9ef4560b8ebbde58c11d20fdbdbd365a9867a41ccf7f0a8a8",
+  "controller_sha256": "b624f442b020715587e4251f2df97fb6f6b88cd6f515ccd1897f7b0fb5335068",
+  "parameters_sha256": "a62b267cd12f9543dce163c1731ba8a21b8fe00f0dc2782605dd78e65e15cba9",
+  "scenario_records": [
+    {
+      "replication": 1,
+      "seed": 42,
+      "sha256": "f870b278390b79455a770c93a42a62b9d997292d4cecfafe5aa5681669e71d75",
+      "path": "scenarios\\rep_001.json"
+    },
+    {
+      "replication": 2,
+      "seed": 43,
+      "sha256": "18ebb2b7c75ab008f1a899b9ec13a0db0b1a98ff7363db46ce8b697e3d7fb4d3",
+      "path": "scenarios\\rep_002.json"
+    },
+    {
+      "replication": 3,
+      "seed": 44,
+      "sha256": "f47ae80f949a781aafdac786a79f571f13ff85cc8778971262309e838f981903",
+      "path": "scenarios\\rep_003.json"
+    },
+    {
+      "replication": 4,
+      "seed": 45,
+      "sha256": "71bd088936c410167d9967a229387f93c847d372b2b468cb3176219f3b58c98e",
+      "path": "scenarios\\rep_004.json"
+    },
+    {
+      "replication": 5,
+      "seed": 46,
+      "sha256": "fcda7911603075b27df4282bc3a325cbb7d7163d5510095791020584fea35747",
+      "path": "scenarios\\rep_005.json"
+    },
+    {
+      "replication": 6,
+      "seed": 47,
+      "sha256": "de345b5e9501dbcc935425ca46bb73f718f1b4023e647f0fb2d69251223f67ce",
+      "path": "scenarios\\rep_006.json"
+    },
+    {
+      "replication": 7,
+      "seed": 48,
+      "sha256": "0bc4b7e09dc31c924dbedbda824c7f2f62e1befcfb6d8fa2464e10cd22df9190",
+      "path": "scenarios\\rep_007.json"
+    },
+    {
+      "replication": 8,
+      "seed": 49,
+      "sha256": "7d535bcd06f0897005805ba86c9e932ecc87d4d6c3175215693faf276097cf05",
+      "path": "scenarios\\rep_008.json"
+    },
+    {
+      "replication": 9,
+      "seed": 50,
+      "sha256": "9e0caad9f7d690ffbe59762e9d464b82ef8e581801e7370cb413fc8ef06039b2",
+      "path": "scenarios\\rep_009.json"
+    },
+    {
+      "replication": 10,
+      "seed": 51,
+      "sha256": "a99959aeee3f2d8b468078796b52356c0c4f7dc42100959012a3b7d989af6f39",
+      "path": "scenarios\\rep_010.json"
+    }
+  ],
+  "experiment_log": "experiment.log",
+  "primary_metrics": [
+    "service_units_per_driver_hour",
+    "food_completion_rate",
+    "mean_food_completion_ticks",
+    "platform_revenue_per_order",
+    "emission_intensity_per_service_unit"
+  ],
+  "kpi_taxonomy": "subject-centric; research questions select metrics across subjects",
+  "kpi_subjects": {
+    "driver": [
+      "service_units_per_driver_hour",
+      "service_units_per_busy_driver_hour",
+      "service_units_per_km",
+      "mean_food_pickup_wait_ticks",
+      "mean_integrated_food_pickup_wait_ticks",
+      "mean_integrated_grocery_pickup_wait_ticks",
+      "driver_food_pickup_wait_saved_ticks",
+      "driver_food_pickup_wait_saved_pct",
+      "driver_revenue_per_order",
+      "driver_profit_per_order",
+      "driver_utilization",
+      "driver_profit_per_driver"
+    ],
+    "customer": [
+      "food_completion_rate",
+      "food_cancellation_rate",
+      "food_unfinished_rate",
+      "mean_food_completion_ticks",
+      "mean_food_post_pickup_delivery_ticks",
+      "integrated_completion_rate",
+      "mean_integrated_completion_ticks",
+      "integrated_cancellation_rate",
+      "integrated_unfinished_rate"
+    ],
+    "merchant": [
+      "merchant_revenue_per_order",
+      "mean_food_preparation_queue_ticks",
+      "mean_integrated_grocery_preparation_queue_ticks",
+      "mean_food_ready_to_handover_ticks",
+      "mean_integrated_grocery_ready_to_handover_ticks"
+    ],
+    "platform": [
+      "platform_revenue_per_order"
+    ],
+    "environment": [
+      "emission_intensity_per_service_unit",
+      "total_emission_units",
+      "emission_units_per_order",
+      "emission_units_per_completed_order",
+      "marginal_emission_per_completed_grocery",
+      "marginal_emission_per_additional_service_unit",
+      "total_emission_change_pct",
+      "emission_output_elasticity"
+    ],
+    "system": [
+      "service_output_change_pct"
+    ]
+  },
+  "emission_pair_metrics": [
+    "marginal_emission_per_completed_grocery",
+    "marginal_emission_per_additional_service_unit",
+    "service_output_change_pct",
+    "total_emission_change_pct",
+    "emission_output_elasticity"
+  ],
+  "driver_pair_metrics": [
+    "driver_food_pickup_wait_saved_ticks",
+    "driver_food_pickup_wait_saved_pct"
+  ],
+  "integrated_experience_metrics": [
+    "integrated_completion_rate",
+    "mean_integrated_completion_ticks",
+    "integrated_cancellation_rate",
+    "integrated_unfinished_rate",
+    "mean_integrated_food_pickup_wait_ticks",
+    "mean_integrated_grocery_pickup_wait_ticks",
+    "mean_integrated_grocery_preparation_queue_ticks",
+    "mean_integrated_grocery_ready_to_handover_ticks"
+  ],
+  "statistics": "integrated minus matching p=0 within each condition and replication; 10000 paired bootstrap resamples, pointwise percentile 95% interval; two-sided paired significance at alpha=0.05; Shapiro-Wilk selects paired t-test when normality is not rejected and Wilcoxon signed-rank otherwise; Holm correction across primary metrics within condition",
+  "sensitivity_effects": "alternative paired delta minus reference paired delta within replication; pointwise paired bootstrap intervals",
+  "emission_statistics": "paired total-emission change divided by completed grocery or positive net additional service units; percentage changes and emission-output elasticity; pointwise paired bootstrap intervals",
+  "driver_statistics": "paired food pickup-wait saved time, defined as matching food-only baseline minus integrated condition; positive values mean time saved; percentage is undefined when baseline pickup wait is zero or unobserved",
+  "service_level_statistics": "condition-level integrated-customer experience across independently seeded day blocks; pointwise bootstrap intervals; food-service protection remains paired against food-only",
+  "replication_unit": "independently seeded day block; conditions sharing a replication seed are dependent",
+  "visualization_condition": "baseline or reference integration probability",
+  "interpretation": "Food-only is the baseline. One completed food component and one completed grocery component are equal unweighted service units; integrated route is store-restaurant-customer."
+}
